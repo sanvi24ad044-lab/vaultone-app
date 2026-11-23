@@ -10,9 +10,9 @@ import {
 } from 'lucide-react';
 
 // --- SUPABASE CLIENT ---
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseAnonKey
+const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+const supabase = supabaseUrl.startsWith('https://') && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
