@@ -6,7 +6,7 @@ import {
   Shield, Key, Lock, Unlock, Search, Plus,
   FileText, FolderGit2, Zap, Check, Copy, Bot,
   ArrowRight, LogOut, UserPlus, LogIn, Trash2, Clock, ShieldCheck, AlertTriangle,
-  Cloud, Loader2, X
+  Cloud, Loader2, X, Eye, EyeOff, Globe, Mail
 } from 'lucide-react';
 
 // --- SUPABASE CLIENT ---
@@ -85,6 +85,7 @@ interface AccountItem {
   category: string;
   username: string;
   password: string;
+  siteUrl?: string;
 }
 
 interface ExperimentItem {
@@ -111,19 +112,11 @@ interface VaultPayload {
   documents: DocumentItem[];
 }
 
-const DEFAULT_VAULT: VaultPayload = {
-  accounts: [
-    { id: '1', name: 'GitHub', category: 'Development', username: 'student_dev', password: 'ghp_SecretToken99!' },
-    { id: '2', name: 'AWS Educate', category: 'Cloud', username: 'sanvi@college.edu', password: 'AwsCloud#2026' },
-  ],
-  experiments: [
-    { id: '1', name: 'SoilSense AI Builder', tool: 'v0.dev', category: 'AI Builder', status: 'Completed', rating: 5, notes: 'Generated clean Tailwind UI components for college project.' },
-    { id: '2', name: 'Local Vector Store', tool: 'ChromaDB', category: 'Database', status: 'Experimenting', rating: 4, notes: 'Testing fast vector indexing locally.' },
-  ],
-  documents: [
-    { id: '1', title: 'College Student ID', category: 'Education', expiry: '2026-12-30', status: 'Expiring Soon' },
-    { id: '2', title: 'Passport Copy', category: 'Identity', expiry: '2030-05-14', status: 'Valid' },
-  ],
+// Completely empty starter vault — zero dummy data for any user
+const EMPTY_VAULT: VaultPayload = {
+  accounts: [],
+  experiments: [],
+  documents: [],
 };
 
 export default function VaultOneApp() {
@@ -143,11 +136,12 @@ export default function VaultOneApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'local'>('synced');
 
-  // Vault Data (Held in RAM only while unlocked)
-  const [vaultData, setVaultData] = useState<VaultPayload>(DEFAULT_VAULT);
+  // Vault Data (Held in RAM only while unlocked — strictly isolated per user)
+  const [vaultData, setVaultData] = useState<VaultPayload>(EMPTY_VAULT);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
   // Modal State for Adding Items
   const [showAddModal, setShowAddModal] = useState(false);
@@ -156,6 +150,7 @@ export default function VaultOneApp() {
   const [formField2, setFormField2] = useState('');
   const [formField3, setFormField3] = useState('');
   const [formField4, setFormField4] = useState('');
+  const [formField5, setFormField5] = useState('');
 
   // AI Query State
   const [aiQuestion, setAiQuestion] = useState('');
@@ -170,7 +165,8 @@ export default function VaultOneApp() {
       if (stage !== 'unlocked') return;
       if (awayTimerRef.current) clearTimeout(awayTimerRef.current);
       awayTimerRef.current = setTimeout(() => {
-        setVaultData({ accounts: [], experiments: [], documents: [] });
+        setVaultData(EMPTY_VAULT);
+        setVisiblePasswords({});
         setActiveQuickPin('');
         setQuickPinInput('');
         setLockReason('Auto-locked after 5 seconds away from tab for your privacy.');
@@ -208,7 +204,7 @@ export default function VaultOneApp() {
     };
   }, [stage]);
 
-  // --- LAYER 1: SIGN UP (Creates Account in Supabase + Local Cache) ---
+  // --- LAYER 1: SIGN UP (Creates Private Empty Vault in Supabase) ---
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -226,7 +222,7 @@ export default function VaultOneApp() {
     try {
       const accountPassHash = await hashText(accountPassInput);
       const quickPinHash = await hashText(quickPinInput);
-      const encryptedVault = await encryptData(DEFAULT_VAULT, quickPinInput);
+      const encryptedVault = await encryptData(EMPTY_VAULT, quickPinInput);
 
       if (supabase) {
         const { data: existing } = await supabase
@@ -261,7 +257,8 @@ export default function VaultOneApp() {
       setEncryptedBlob(encryptedVault);
       setCurrentUserEmail(email);
       setActiveQuickPin(quickPinInput);
-      setVaultData(DEFAULT_VAULT);
+      setVaultData(EMPTY_VAULT);
+      setVisiblePasswords({});
       setAccountPassInput('');
       setQuickPinInput('');
       setStage('unlocked');
@@ -272,7 +269,7 @@ export default function VaultOneApp() {
     }
   };
 
-  // --- LAYER 1: SIGN IN (Fetches Encrypted Vault from Supabase) ---
+  // --- LAYER 1: SIGN IN (Fetches Only This User's Encrypted Vault) ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -327,11 +324,13 @@ export default function VaultOneApp() {
       users[email] = { accountPassHash, quickPinHash, encryptedVault };
       localStorage.setItem('vaultone_users', JSON.stringify(users));
 
+      setVaultData(EMPTY_VAULT);
+      setVisiblePasswords({});
       setEncryptedBlob(encryptedVault);
       setCurrentUserEmail(email);
       setAccountPassInput('');
       setQuickPinInput('');
-      setLockReason('Account verified! Enter your Quick Unlock Password to decrypt your vault.');
+      setLockReason('Account verified! Enter your Quick Unlock Password to decrypt your private vault.');
       setStage('pin_lock');
     } catch (err: any) {
       setErrorMsg(err.message || 'Unable to reach cloud vault.');
@@ -340,7 +339,7 @@ export default function VaultOneApp() {
     }
   };
 
-  // --- LAYER 2: QUICK UNLOCK (Decrypts Vault Locally in RAM) ---
+  // --- LAYER 2: QUICK UNLOCK (Decrypts Only Current User's Vault Locally in RAM) ---
   const handleQuickUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -373,7 +372,12 @@ export default function VaultOneApp() {
       }
 
       const decrypted = await decryptData(blobToDecrypt, quickPinInput);
-      setVaultData(decrypted);
+      setVaultData({
+        accounts: decrypted.accounts || [],
+        experiments: decrypted.experiments || [],
+        documents: decrypted.documents || [],
+      });
+      setVisiblePasswords({});
       setActiveQuickPin(quickPinInput);
       setQuickPinInput('');
       setLockReason('');
@@ -417,7 +421,8 @@ export default function VaultOneApp() {
 
   // --- MANUAL LOCK & FULL LOGOUT ---
   const handleQuickLock = () => {
-    setVaultData({ accounts: [], experiments: [], documents: [] });
+    setVaultData(EMPTY_VAULT);
+    setVisiblePasswords({});
     setActiveQuickPin('');
     setQuickPinInput('');
     setLockReason('Vault locked manually.');
@@ -425,12 +430,14 @@ export default function VaultOneApp() {
   };
 
   const handleFullLogout = () => {
-    setVaultData({ accounts: [], experiments: [], documents: [] });
+    setVaultData(EMPTY_VAULT);
+    setVisiblePasswords({});
     setActiveQuickPin('');
     setEncryptedBlob('');
     setCurrentUserEmail('');
     setAccountPassInput('');
     setQuickPinInput('');
+    setAiReply('');
     setErrorMsg('');
     setStage('auth');
   };
@@ -450,27 +457,28 @@ export default function VaultOneApp() {
     if (newItemType === 'account') {
       updated.accounts.push({
         id,
-        name: formField1,
-        category: formField2 || 'General',
-        username: formField3 || 'user',
-        password: formField4 || '********',
+        name: formField1.trim(),
+        category: formField2.trim() || 'Website / App',
+        username: formField3.trim(),
+        password: formField4,
+        siteUrl: formField5.trim(),
       });
     } else if (newItemType === 'experiment') {
       updated.experiments.push({
         id,
-        name: formField1,
-        tool: formField2 || 'Custom Tool',
-        category: formField3 || 'Experiment',
+        name: formField1.trim(),
+        tool: formField2.trim() || 'Custom Tool',
+        category: formField3.trim() || 'Project',
         status: 'Active',
         rating: 5,
-        notes: formField4 || 'Logged in VaultOne Lab.',
+        notes: formField4.trim() || 'Saved in private VaultOne Lab.',
       });
     } else if (newItemType === 'document') {
       updated.documents.push({
         id,
-        title: formField1,
-        category: formField2 || 'Personal',
-        expiry: formField3 || '2027-12-31',
+        title: formField1.trim(),
+        category: formField2.trim() || 'Personal',
+        expiry: formField3.trim() || 'No Expiry',
         status: 'Valid',
       });
     }
@@ -480,6 +488,7 @@ export default function VaultOneApp() {
     setFormField2('');
     setFormField3('');
     setFormField4('');
+    setFormField5('');
     setShowAddModal(false);
   };
 
@@ -504,17 +513,27 @@ export default function VaultOneApp() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const togglePasswordVisibility = (id: string) => {
+    setVisiblePasswords(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const handleRunAiSearch = () => {
     if (!aiQuestion.trim()) return;
     const q = aiQuestion.toLowerCase();
-    if (q.includes('expir') || q.includes('document') || q.includes('id')) {
+    if (q.includes('gmail') || q.includes('email') || q.includes('where') || q.includes('site') || q.includes('account') || q.includes('login') || q.includes('password')) {
+      if (vaultData.accounts.length === 0) {
+        setAiReply('You have not saved any website or app logins in your vault yet.');
+      } else {
+        const list = vaultData.accounts
+          .map(a => `${a.name} (ID/Gmail: ${a.username}${a.siteUrl ? ` • ${a.siteUrl}` : ''})`)
+          .join('; ');
+        setAiReply(`You have signed into ${vaultData.accounts.length} place(s): ${list}. Open "Accounts & Passwords" and click the Eye icon to view any password.`);
+      }
+    } else if (q.includes('expir') || q.includes('document') || q.includes('id')) {
       const docs = vaultData.documents.map(d => `${d.title} (Expires: ${d.expiry})`).join(', ');
-      setAiReply(`You have ${vaultData.documents.length} saved documents: ${docs || 'None yet'}.`);
-    } else if (q.includes('account') || q.includes('password') || q.includes('login')) {
-      const accs = vaultData.accounts.map(a => `${a.name} (${a.username})`).join(', ');
-      setAiReply(`You have ${vaultData.accounts.length} encrypted accounts stored: ${accs || 'None yet'}. (Raw passwords remain masked for safety).`);
+      setAiReply(`You have ${vaultData.documents.length} saved document(s): ${docs || 'None yet'}.`);
     } else {
-      setAiReply(`Vault Summary for ${currentUserEmail}: ${vaultData.accounts.length} Accounts, ${vaultData.experiments.length} Lab Experiments, and ${vaultData.documents.length} Documents encrypted with AES-256-GCM.`);
+      setAiReply(`Private Vault for ${currentUserEmail}: ${vaultData.accounts.length} Saved Logins, ${vaultData.experiments.length} Lab Notes, and ${vaultData.documents.length} Documents.`);
     }
   };
 
@@ -530,7 +549,7 @@ export default function VaultOneApp() {
               <Shield className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-white">VaultOne</h1>
-            <p className="text-xs text-slate-400">Zero-Knowledge Cloud-Synced Personal Vault</p>
+            <p className="text-xs text-slate-400">Private Zero-Knowledge Password & Login Tracker</p>
           </div>
 
           <div className="grid grid-cols-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
@@ -559,11 +578,11 @@ export default function VaultOneApp() {
           {authMode === 'signup' ? (
             <form onSubmit={handleSignUp} className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Email Address</label>
+                <label className="block text-xs text-slate-400 mb-1">Your Personal Email Address</label>
                 <input
                   type="email"
                   required
-                  placeholder="you@example.com"
+                  placeholder="you@gmail.com"
                   value={emailInput}
                   onChange={e => setEmailInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -574,7 +593,7 @@ export default function VaultOneApp() {
                 <input
                   type="password"
                   required
-                  placeholder="Used when logging into your account"
+                  placeholder="Used when signing into your account"
                   value={accountPassInput}
                   onChange={e => setAccountPassInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -585,7 +604,7 @@ export default function VaultOneApp() {
                 <input
                   type="password"
                   required
-                  placeholder="Used to decrypt & unlock after 5s tab switch"
+                  placeholder="Decrypts only your private vault"
                   value={quickPinInput}
                   onChange={e => setQuickPinInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-indigo-500/40 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -596,7 +615,7 @@ export default function VaultOneApp() {
                 disabled={isLoading}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
               >
-                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating Cloud Vault...</> : 'Create Encrypted Vault'}
+                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating Private Vault...</> : 'Create Private Empty Vault'}
               </button>
             </form>
           ) : (
@@ -606,7 +625,7 @@ export default function VaultOneApp() {
                 <input
                   type="email"
                   required
-                  placeholder="you@example.com"
+                  placeholder="you@gmail.com"
                   value={emailInput}
                   onChange={e => setEmailInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -628,7 +647,7 @@ export default function VaultOneApp() {
                 disabled={isLoading}
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
               >
-                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Fetching Encrypted Vault...</> : 'Continue to Vault Unlock'}
+                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Fetching Your Vault...</> : 'Continue to Vault Unlock'}
               </button>
             </form>
           )}
@@ -679,7 +698,7 @@ export default function VaultOneApp() {
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-medium rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 text-sm"
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
-              Decrypt & Open Vault
+              Decrypt & Open My Vault
             </button>
           </form>
 
@@ -695,11 +714,12 @@ export default function VaultOneApp() {
   }
 
   // =========================================================================
-  // SCREEN 3: UNLOCKED VAULT COMMAND CENTER
+  // SCREEN 3: UNLOCKED PRIVATE VAULT COMMAND CENTER
   // =========================================================================
   const filteredAccounts = vaultData.accounts.filter(a =>
     a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.username.toLowerCase().includes(searchQuery.toLowerCase())
+    a.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.siteUrl || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const filteredExperiments = vaultData.experiments.filter(e =>
@@ -711,6 +731,8 @@ export default function VaultOneApp() {
     d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     d.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const uniqueEmailsUsed = Array.from(new Set(vaultData.accounts.map(a => a.username).filter(Boolean)));
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
@@ -730,7 +752,7 @@ export default function VaultOneApp() {
             {[
               { id: 'dashboard', label: 'Dashboard', icon: Shield },
               { id: 'accounts', label: 'Accounts & Passwords', icon: Key },
-              { id: 'experiments', label: 'Student Experiment Lab', icon: Zap },
+              { id: 'experiments', label: 'Personal Notes & Lab', icon: Zap },
               { id: 'documents', label: 'Document & Identity', icon: FileText },
               { id: 'ai', label: 'VaultAI Assistant', icon: Bot },
             ].map((tab) => {
@@ -777,9 +799,9 @@ export default function VaultOneApp() {
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
           <div>
             <h1 className="text-2xl font-bold text-white capitalize">{activeTab}</h1>
-            <div className="flex items-center gap-3 mt-1">
+            <div className="flex flex-wrap items-center gap-3 mt-1">
               <p className="text-xs text-emerald-400 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4" /> Encrypted locally with AES-256-GCM
+                <ShieldCheck className="w-4 h-4" /> Private to {currentUserEmail} (AES-256-GCM)
               </p>
               <span className="text-slate-700">•</span>
               <p className="text-xs text-sky-400 flex items-center gap-1.5">
@@ -794,17 +816,17 @@ export default function VaultOneApp() {
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search vault..."
+                placeholder="Search site, Gmail, ID..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500 w-56"
               />
             </div>
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => { setNewItemType('account'); setShowAddModal(true); }}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-indigo-600/20"
             >
-              <Plus className="w-4 h-4" /> Add to Vault
+              <Plus className="w-4 h-4" /> Save Login / Item
             </button>
           </div>
         </header>
@@ -813,10 +835,10 @@ export default function VaultOneApp() {
           <div className="space-y-8">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: 'Saved Accounts', val: vaultData.accounts.length, icon: Key, color: 'text-indigo-400' },
-                { label: 'Lab Experiments', val: vaultData.experiments.length, icon: Zap, color: 'text-amber-400' },
+                { label: 'Sites / Logins Saved', val: vaultData.accounts.length, icon: Key, color: 'text-indigo-400' },
+                { label: 'Gmail / IDs Used', val: uniqueEmailsUsed.length, icon: Mail, color: 'text-sky-400' },
                 { label: 'Identity Docs', val: vaultData.documents.length, icon: FolderGit2, color: 'text-blue-400' },
-                { label: 'Encryption', val: 'AES-256', icon: Shield, color: 'text-emerald-400' },
+                { label: 'Private Notes', val: vaultData.experiments.length, icon: Zap, color: 'text-amber-400' },
               ].map((m, idx) => {
                 const Icon = m.icon;
                 return (
@@ -836,24 +858,67 @@ export default function VaultOneApp() {
             <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Zap className="w-5 h-5 text-amber-400" /> Recent Lab Experiments
+                  <Key className="w-5 h-5 text-indigo-400" /> Where You Have Signed In
                 </h3>
-                <button onClick={() => setActiveTab('experiments')} className="text-xs text-indigo-400 hover:underline flex items-center gap-1">
-                  View All <ArrowRight className="w-3 h-3" />
+                <button onClick={() => setActiveTab('accounts')} className="text-xs text-indigo-400 hover:underline flex items-center gap-1">
+                  Manage & View Passwords <ArrowRight className="w-3 h-3" />
                 </button>
               </div>
-              <div className="grid md:grid-cols-2 gap-4">
-                {vaultData.experiments.map((exp) => (
-                  <div key={exp.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg">{exp.category}</span>
-                      <span className="text-xs text-slate-400">Tool: {exp.tool}</span>
+
+              {vaultData.accounts.length === 0 ? (
+                <div className="bg-slate-950 border border-dashed border-slate-800 rounded-xl p-8 text-center space-y-3">
+                  <p className="text-sm text-slate-300 font-medium">Your private vault is completely empty.</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Click <strong>Save Login / Item</strong> to record which websites or apps you signed into, which Gmail or username you used, and the password you set. Only you can see this.
+                  </p>
+                  <button
+                    onClick={() => { setNewItemType('account'); setShowAddModal(true); }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                  >
+                    <Plus className="w-4 h-4" /> Add Your First Website Login
+                  </button>
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {vaultData.accounts.map((acc) => (
+                    <div key={acc.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-white text-sm">{acc.name}</span>
+                        <span className="text-[11px] px-2.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg">{acc.category}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 flex items-center gap-1.5">
+                        <Mail className="w-3.5 h-3.5 text-slate-400" /> Signed in with: <span className="text-emerald-400 font-medium">{acc.username}</span>
+                      </p>
+                      {acc.siteUrl && (
+                        <p className="text-xs text-slate-400 flex items-center gap-1.5 truncate">
+                          <Globe className="w-3.5 h-3.5 text-slate-500 shrink-0" /> {acc.siteUrl}
+                        </p>
+                      )}
+                      <div className="pt-1 flex items-center justify-between border-t border-slate-900">
+                        <span className="text-xs font-mono text-slate-300">
+                          {visiblePasswords[acc.id] ? acc.password : '••••••••••••'}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => togglePasswordVisibility(acc.id)}
+                            className="p-1.5 text-slate-400 hover:text-white bg-slate-900 rounded-lg border border-slate-800"
+                            title={visiblePasswords[acc.id] ? 'Hide Password' : 'Show Password'}
+                          >
+                            {visiblePasswords[acc.id] ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={() => handleCopy(acc.id, acc.password)}
+                            className="p-1.5 text-slate-400 hover:text-white bg-slate-900 rounded-lg border border-slate-800"
+                            title="Copy Password"
+                          >
+                            {copiedId === acc.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <h4 className="font-semibold text-white text-sm">{exp.name}</h4>
-                    <p className="text-xs text-slate-400">{exp.notes}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         )}
@@ -861,26 +926,47 @@ export default function VaultOneApp() {
         {activeTab === 'accounts' && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white">Encrypted Passwords & Logins</h3>
-              <span className="text-xs text-slate-400">Synced as AES-256 ciphertext</span>
+              <div>
+                <h3 className="font-bold text-white">Your Saved Logins, Gmail IDs & Passwords</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Click the eye icon to reveal the exact password you saved for any website</p>
+              </div>
+              <button
+                onClick={() => { setNewItemType('account'); setShowAddModal(true); }}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Login
+              </button>
             </div>
             <div className="divide-y divide-slate-800">
               {filteredAccounts.length === 0 ? (
-                <p className="p-6 text-sm text-slate-500">No matching accounts found.</p>
+                <p className="p-6 text-sm text-slate-500">No saved logins yet. Click &ldquo;Add Login&rdquo; to save a website, Gmail ID, and password.</p>
               ) : (
                 filteredAccounts.map((acc) => (
-                  <div key={acc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all">
+                  <div key={acc.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-800/30 transition-all">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-indigo-600/10 text-indigo-400 rounded-xl flex items-center justify-center font-bold">
+                      <div className="w-10 h-10 bg-indigo-600/10 text-indigo-400 rounded-xl flex items-center justify-center font-bold shrink-0">
                         {acc.name[0]?.toUpperCase()}
                       </div>
                       <div>
-                        <h4 className="font-semibold text-white text-sm">{acc.name}</h4>
-                        <p className="text-xs text-slate-400">{acc.username}</p>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-white text-sm">{acc.name}</h4>
+                          <span className="text-[11px] px-2 py-0.5 bg-slate-950 text-slate-400 rounded-md border border-slate-800">{acc.category}</span>
+                        </div>
+                        <p className="text-xs text-emerald-400 mt-0.5">ID / Gmail: {acc.username}</p>
+                        {acc.siteUrl && <p className="text-[11px] text-slate-500">{acc.siteUrl}</p>}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs px-3 py-1 bg-slate-950 text-slate-400 rounded-lg border border-slate-800">{acc.category}</span>
+                      <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 min-w-[140px] text-center">
+                        {visiblePasswords[acc.id] ? acc.password : '••••••••••••'}
+                      </div>
+                      <button
+                        onClick={() => togglePasswordVisibility(acc.id)}
+                        title={visiblePasswords[acc.id] ? 'Hide Password' : 'Reveal Password'}
+                        className="p-2 text-slate-400 hover:text-white bg-slate-950 rounded-lg border border-slate-800"
+                      >
+                        {visiblePasswords[acc.id] ? <EyeOff className="w-4 h-4 text-amber-400" /> : <Eye className="w-4 h-4" />}
+                      </button>
                       <button
                         onClick={() => handleCopy(acc.id, acc.password)}
                         title="Copy Password"
@@ -906,7 +992,7 @@ export default function VaultOneApp() {
         {activeTab === 'experiments' && (
           <div className="grid md:grid-cols-2 gap-4">
             {filteredExperiments.length === 0 ? (
-              <p className="text-sm text-slate-500">No experiments logged yet.</p>
+              <p className="text-sm text-slate-500">No personal notes logged yet.</p>
             ) : (
               filteredExperiments.map((exp) => (
                 <div key={exp.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
@@ -934,7 +1020,7 @@ export default function VaultOneApp() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between">
               <h3 className="font-bold text-white">Identity & Academic Documents</h3>
-              <span className="text-xs text-slate-400">Expiry tracking</span>
+              <span className="text-xs text-slate-400">Private to your account</span>
             </div>
             <div className="divide-y divide-slate-800">
               {filteredDocuments.length === 0 ? (
@@ -944,7 +1030,7 @@ export default function VaultOneApp() {
                   <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all">
                     <div>
                       <h4 className="font-semibold text-white text-sm">{doc.title}</h4>
-                      <p className="text-xs text-slate-400">Category: {doc.category} • Expires: {doc.expiry}</p>
+                      <p className="text-xs text-slate-400">Category: {doc.category} • Expiry: {doc.expiry}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg">
@@ -972,13 +1058,13 @@ export default function VaultOneApp() {
               </div>
               <div>
                 <h3 className="font-bold text-white">Local VaultAI Query</h3>
-                <p className="text-xs text-slate-400">Runs 100% locally in browser memory—zero raw data leaves your device</p>
+                <p className="text-xs text-slate-400">Searches only your decrypted vault in browser RAM</p>
               </div>
             </div>
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Ask e.g. 'Which documents are expiring?' or 'List my accounts'"
+                placeholder="Ask e.g. 'Where have I logged in?' or 'Which Gmail did I use?'"
                 value={aiQuestion}
                 onChange={(e) => setAiQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleRunAiSearch()}
@@ -1004,7 +1090,7 @@ export default function VaultOneApp() {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-white text-lg">Add Encrypted Item</h3>
+              <h3 className="font-bold text-white text-lg">Save to Private Vault</h3>
               <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
@@ -1018,7 +1104,7 @@ export default function VaultOneApp() {
                   onClick={() => setNewItemType(t)}
                   className={`py-2 rounded-lg capitalize ${newItemType === t ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
                 >
-                  {t}
+                  {t === 'account' ? 'Login / Site' : t === 'experiment' ? 'Note' : 'Document'}
                 </button>
               ))}
             </div>
@@ -1027,31 +1113,42 @@ export default function VaultOneApp() {
               <input
                 type="text"
                 required
-                placeholder={newItemType === 'account' ? 'Service Name (e.g. Gmail)' : newItemType === 'experiment' ? 'Experiment Name' : 'Document Title'}
+                placeholder={newItemType === 'account' ? 'Website / App Name (e.g. Instagram, GitHub, SBI)' : newItemType === 'experiment' ? 'Note Title' : 'Document Title'}
                 value={formField1}
                 onChange={(e) => setFormField1(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
               />
               <input
                 type="text"
-                placeholder={newItemType === 'account' ? 'Category (e.g. Social, Bank)' : newItemType === 'experiment' ? 'Tool Used (e.g. Next.js, Supabase)' : 'Category (e.g. Identity, Education)'}
+                placeholder={newItemType === 'account' ? 'Category (e.g. Social, College, Banking, Shopping)' : newItemType === 'experiment' ? 'Tag / Tool' : 'Category (e.g. Identity, Education)'}
                 value={formField2}
                 onChange={(e) => setFormField2(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
               />
               <input
                 type="text"
-                placeholder={newItemType === 'account' ? 'Username / Email' : newItemType === 'experiment' ? 'Category' : 'Expiry Date (YYYY-MM-DD)'}
+                required={newItemType === 'account'}
+                placeholder={newItemType === 'account' ? 'Gmail / Email / Username used to sign in' : newItemType === 'experiment' ? 'Topic' : 'Expiry Date (YYYY-MM-DD)'}
                 value={formField3}
                 onChange={(e) => setFormField3(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
               />
               {newItemType !== 'document' && (
                 <input
-                  type={newItemType === 'account' ? 'password' : 'text'}
-                  placeholder={newItemType === 'account' ? 'Password' : 'Notes'}
+                  type="text"
+                  required={newItemType === 'account'}
+                  placeholder={newItemType === 'account' ? 'Password you set for this website' : 'Notes'}
                   value={formField4}
                   onChange={(e) => setFormField4(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+              )}
+              {newItemType === 'account' && (
+                <input
+                  type="text"
+                  placeholder="Website URL (optional, e.g. https://github.com)"
+                  value={formField5}
+                  onChange={(e) => setFormField5(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
               )}
@@ -1059,7 +1156,7 @@ export default function VaultOneApp() {
                 type="submit"
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition-all"
               >
-                Encrypt & Save to Cloud
+                Encrypt & Save Privately
               </button>
             </form>
           </div>
