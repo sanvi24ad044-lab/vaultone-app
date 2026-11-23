@@ -1,11 +1,20 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import {
   Shield, Key, Lock, Unlock, Search, Plus,
-  Sparkles, FileText, FolderGit2, Zap, Check, Copy, Bot,
-  ArrowRight, LogOut, UserPlus, LogIn, Trash2, Clock, ShieldCheck, AlertTriangle
+  FileText, FolderGit2, Zap, Check, Copy, Bot,
+  ArrowRight, LogOut, UserPlus, LogIn, Trash2, Clock, ShieldCheck, AlertTriangle,
+  Cloud, Loader2, X
 } from 'lucide-react';
+
+// --- SUPABASE CLIENT ---
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 // --- CRYPTO HELPERS (Real AES-256-GCM Browser Encryption) ---
 async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>) {
@@ -119,20 +128,20 @@ const DEFAULT_VAULT: VaultPayload = {
 
 export default function VaultOneApp() {
   // Auth & Lock States
-  // 'auth' = Layer 1 (Account Sign Up / Login)
-  // 'pin_lock' = Layer 2 (Quick Unlock Password after 5s tab switch or login)
-  // 'unlocked' = Inside Vault
   const [stage, setStage] = useState<'auth' | 'pin_lock' | 'unlocked'>('auth');
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('signup');
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
+  const [encryptedBlob, setEncryptedBlob] = useState<string>('');
 
   // Form inputs for Layer 1 & Layer 2
   const [emailInput, setEmailInput] = useState('');
   const [accountPassInput, setAccountPassInput] = useState('');
   const [quickPinInput, setQuickPinInput] = useState('');
-  const [activeQuickPin, setActiveQuickPin] = useState(''); // Held in RAM only while unlocked
+  const [activeQuickPin, setActiveQuickPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [lockReason, setLockReason] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'local'>('synced');
 
   // Vault Data (Held in RAM only while unlocked)
   const [vaultData, setVaultData] = useState<VaultPayload>(DEFAULT_VAULT);
@@ -155,21 +164,12 @@ export default function VaultOneApp() {
   // Timer ref for 5-second tab switch auto-lock
   const awayTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check if user already has an account on this browser
-  useEffect(() => {
-    const savedUsers = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
-    if (Object.keys(savedUsers).length > 0) {
-      setAuthMode('login');
-    }
-  }, []);
-
   // --- 5-SECOND TAB SWITCH / WINDOW BLUR AUTO-LOCK ---
   useEffect(() => {
     const startLockCountdown = () => {
       if (stage !== 'unlocked') return;
       if (awayTimerRef.current) clearTimeout(awayTimerRef.current);
       awayTimerRef.current = setTimeout(() => {
-        // Wipe sensitive RAM state and drop to Layer 2 Quick Unlock screen
         setVaultData({ accounts: [], experiments: [], documents: [] });
         setActiveQuickPin('');
         setQuickPinInput('');
@@ -208,7 +208,7 @@ export default function VaultOneApp() {
     };
   }, [stage]);
 
-  // --- LAYER 1: SIGN UP (Creates Account Password + Quick Unlock Password) ---
+  // --- LAYER 1: SIGN UP (Creates Account in Supabase + Local Cache) ---
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -222,71 +222,157 @@ export default function VaultOneApp() {
       return;
     }
 
-    const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
-    if (users[email]) {
-      setErrorMsg('An account with this email already exists. Please Sign In.');
-      return;
+    setIsLoading(true);
+    try {
+      const accountPassHash = await hashText(accountPassInput);
+      const quickPinHash = await hashText(quickPinInput);
+      const encryptedVault = await encryptData(DEFAULT_VAULT, quickPinInput);
+
+      if (supabase) {
+        const { data: existing } = await supabase
+          .from('vaults')
+          .select('email')
+          .eq('email', email)
+          .maybeSingle();
+
+        if (existing) {
+          setErrorMsg('An account with this email already exists. Please Sign In.');
+          setIsLoading(false);
+          return;
+        }
+
+        const { error } = await supabase.from('vaults').insert({
+          email,
+          salt: accountPassHash,
+          quick_unlock_verifier: quickPinHash,
+          encrypted_payload: encryptedVault,
+        });
+
+        if (error) throw new Error(error.message);
+        setSyncStatus('synced');
+      } else {
+        setSyncStatus('local');
+      }
+
+      const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
+      users[email] = { accountPassHash, quickPinHash, encryptedVault };
+      localStorage.setItem('vaultone_users', JSON.stringify(users));
+
+      setEncryptedBlob(encryptedVault);
+      setCurrentUserEmail(email);
+      setActiveQuickPin(quickPinInput);
+      setVaultData(DEFAULT_VAULT);
+      setAccountPassInput('');
+      setQuickPinInput('');
+      setStage('unlocked');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to create cloud vault.');
+    } finally {
+      setIsLoading(false);
     }
-
-    const accountPassHash = await hashText(accountPassInput);
-    const quickPinHash = await hashText(quickPinInput);
-    const encryptedVault = await encryptData(DEFAULT_VAULT, quickPinInput);
-
-    users[email] = {
-      accountPassHash,
-      quickPinHash,
-      encryptedVault,
-    };
-
-    localStorage.setItem('vaultone_users', JSON.stringify(users));
-    setCurrentUserEmail(email);
-    setActiveQuickPin(quickPinInput);
-    setVaultData(DEFAULT_VAULT);
-    setAccountPassInput('');
-    setQuickPinInput('');
-    setStage('unlocked');
   };
 
-  // --- LAYER 1: SIGN IN (Verifies Account Password, then sends to Layer 2 Quick Unlock) ---
+  // --- LAYER 1: SIGN IN (Fetches Encrypted Vault from Supabase) ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     const email = emailInput.trim().toLowerCase();
-    const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
-    const userRecord = users[email];
+    setIsLoading(true);
 
-    if (!userRecord) {
-      setErrorMsg('No account found with that email. Please Sign Up first.');
-      return;
+    try {
+      let accountPassHash = '';
+      let quickPinHash = '';
+      let encryptedVault = '';
+
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('vaults')
+          .select('*')
+          .eq('email', email)
+          .maybeSingle();
+
+        if (error) throw new Error(error.message);
+        if (!data) {
+          setErrorMsg('No account found with that email. Please Create Account first.');
+          setIsLoading(false);
+          return;
+        }
+
+        accountPassHash = data.salt;
+        quickPinHash = data.quick_unlock_verifier;
+        encryptedVault = data.encrypted_payload;
+        setSyncStatus('synced');
+      } else {
+        const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
+        const userRecord = users[email];
+        if (!userRecord) {
+          setErrorMsg('No account found with that email. Please Sign Up first.');
+          setIsLoading(false);
+          return;
+        }
+        accountPassHash = userRecord.accountPassHash;
+        quickPinHash = userRecord.quickPinHash;
+        encryptedVault = userRecord.encryptedVault;
+        setSyncStatus('local');
+      }
+
+      const enteredHash = await hashText(accountPassInput);
+      if (enteredHash !== accountPassHash) {
+        setErrorMsg('Incorrect Account Password.');
+        setIsLoading(false);
+        return;
+      }
+
+      const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
+      users[email] = { accountPassHash, quickPinHash, encryptedVault };
+      localStorage.setItem('vaultone_users', JSON.stringify(users));
+
+      setEncryptedBlob(encryptedVault);
+      setCurrentUserEmail(email);
+      setAccountPassInput('');
+      setQuickPinInput('');
+      setLockReason('Account verified! Enter your Quick Unlock Password to decrypt your vault.');
+      setStage('pin_lock');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Unable to reach cloud vault.');
+    } finally {
+      setIsLoading(false);
     }
-
-    const enteredHash = await hashText(accountPassInput);
-    if (enteredHash !== userRecord.accountPassHash) {
-      setErrorMsg('Incorrect Account Password.');
-      return;
-    }
-
-    setCurrentUserEmail(email);
-    setAccountPassInput('');
-    setQuickPinInput('');
-    setLockReason('Account verified! Enter your Quick Unlock Password to decrypt your vault.');
-    setStage('pin_lock');
   };
 
-  // --- LAYER 2: QUICK UNLOCK (Decrypts Vault using Quick Unlock Password) ---
+  // --- LAYER 2: QUICK UNLOCK (Decrypts Vault Locally in RAM) ---
   const handleQuickUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
-    const userRecord = users[currentUserEmail];
-
-    if (!userRecord) {
-      setStage('auth');
-      return;
-    }
+    setIsLoading(true);
 
     try {
-      const decrypted = await decryptData(userRecord.encryptedVault, quickPinInput);
+      let blobToDecrypt = encryptedBlob;
+
+      if (supabase && currentUserEmail) {
+        const { data } = await supabase
+          .from('vaults')
+          .select('encrypted_payload')
+          .eq('email', currentUserEmail)
+          .maybeSingle();
+        if (data?.encrypted_payload) {
+          blobToDecrypt = data.encrypted_payload;
+          setEncryptedBlob(blobToDecrypt);
+        }
+      }
+
+      if (!blobToDecrypt) {
+        const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
+        blobToDecrypt = users[currentUserEmail]?.encryptedVault || '';
+      }
+
+      if (!blobToDecrypt) {
+        setStage('auth');
+        setIsLoading(false);
+        return;
+      }
+
+      const decrypted = await decryptData(blobToDecrypt, quickPinInput);
       setVaultData(decrypted);
       setActiveQuickPin(quickPinInput);
       setQuickPinInput('');
@@ -294,17 +380,38 @@ export default function VaultOneApp() {
       setStage('unlocked');
     } catch {
       setErrorMsg('Wrong Quick Unlock Password. Unable to decrypt vault.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // --- SAVE ENCRYPTED VAULT TO STORAGE ---
+  // --- SAVE ENCRYPTED VAULT TO SUPABASE + LOCALSTORAGE ---
   const persistVault = async (updated: VaultPayload) => {
     setVaultData(updated);
     if (!currentUserEmail || !activeQuickPin) return;
+
+    setSyncStatus('syncing');
+    const newEncryptedPayload = await encryptData(updated, activeQuickPin);
+    setEncryptedBlob(newEncryptedPayload);
+
     const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
     if (users[currentUserEmail]) {
-      users[currentUserEmail].encryptedVault = await encryptData(updated, activeQuickPin);
+      users[currentUserEmail].encryptedVault = newEncryptedPayload;
       localStorage.setItem('vaultone_users', JSON.stringify(users));
+    }
+
+    if (supabase) {
+      const { error } = await supabase
+        .from('vaults')
+        .update({
+          encrypted_payload: newEncryptedPayload,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('email', currentUserEmail);
+
+      setSyncStatus(error ? 'local' : 'synced');
+    } else {
+      setSyncStatus('local');
     }
   };
 
@@ -320,6 +427,7 @@ export default function VaultOneApp() {
   const handleFullLogout = () => {
     setVaultData({ accounts: [], experiments: [], documents: [] });
     setActiveQuickPin('');
+    setEncryptedBlob('');
     setCurrentUserEmail('');
     setAccountPassInput('');
     setQuickPinInput('');
@@ -380,6 +488,16 @@ export default function VaultOneApp() {
     await persistVault(updated);
   };
 
+  const handleDeleteExperiment = async (id: string) => {
+    const updated = { ...vaultData, experiments: vaultData.experiments.filter(e => e.id !== id) };
+    await persistVault(updated);
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+    const updated = { ...vaultData, documents: vaultData.documents.filter(d => d.id !== id) };
+    await persistVault(updated);
+  };
+
   const handleCopy = (id: string, val: string) => {
     navigator.clipboard.writeText(val);
     setCopiedId(id);
@@ -412,7 +530,7 @@ export default function VaultOneApp() {
               <Shield className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-white">VaultOne</h1>
-            <p className="text-xs text-slate-400">Zero-Knowledge Personal Vault & Command Center</p>
+            <p className="text-xs text-slate-400">Zero-Knowledge Cloud-Synced Personal Vault</p>
           </div>
 
           <div className="grid grid-cols-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
@@ -467,7 +585,7 @@ export default function VaultOneApp() {
                 <input
                   type="password"
                   required
-                  placeholder="Used to unlock screen after 5s tab switch"
+                  placeholder="Used to decrypt & unlock after 5s tab switch"
                   value={quickPinInput}
                   onChange={e => setQuickPinInput(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-indigo-500/40 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -475,9 +593,10 @@ export default function VaultOneApp() {
               </div>
               <button
                 type="submit"
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30"
+                disabled={isLoading}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
               >
-                Create Encrypted Vault
+                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating Cloud Vault...</> : 'Create Encrypted Vault'}
               </button>
             </form>
           ) : (
@@ -506,9 +625,10 @@ export default function VaultOneApp() {
               </div>
               <button
                 type="submit"
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30"
+                disabled={isLoading}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
               >
-                Continue to Vault Unlock
+                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Fetching Encrypted Vault...</> : 'Continue to Vault Unlock'}
               </button>
             </form>
           )}
@@ -555,9 +675,11 @@ export default function VaultOneApp() {
             />
             <button
               type="submit"
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 text-sm"
+              disabled={isLoading}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-medium rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 text-sm"
             >
-              <Unlock className="w-4 h-4" /> Decrypt & Open Vault
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
+              Decrypt & Open Vault
             </button>
           </form>
 
@@ -578,6 +700,16 @@ export default function VaultOneApp() {
   const filteredAccounts = vaultData.accounts.filter(a =>
     a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     a.username.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredExperiments = vaultData.experiments.filter(e =>
+    e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    e.tool.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredDocuments = vaultData.documents.filter(d =>
+    d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    d.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -645,9 +777,16 @@ export default function VaultOneApp() {
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
           <div>
             <h1 className="text-2xl font-bold text-white capitalize">{activeTab}</h1>
-            <p className="text-xs text-emerald-400 flex items-center gap-1.5 mt-1">
-              <ShieldCheck className="w-4 h-4" /> Encrypted locally with AES-256-GCM
-            </p>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4" /> Encrypted locally with AES-256-GCM
+              </p>
+              <span className="text-slate-700">•</span>
+              <p className="text-xs text-sky-400 flex items-center gap-1.5">
+                <Cloud className="w-3.5 h-3.5" />
+                {syncStatus === 'syncing' ? 'Syncing to Supabase...' : syncStatus === 'synced' ? 'Synced to Cloud' : 'Saved Locally'}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -723,108 +862,137 @@ export default function VaultOneApp() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-800 flex items-center justify-between">
               <h3 className="font-bold text-white">Encrypted Passwords & Logins</h3>
-              <span className="text-xs text-slate-400">Saved persistently in encrypted storage</span>
+              <span className="text-xs text-slate-400">Synced as AES-256 ciphertext</span>
             </div>
             <div className="divide-y divide-slate-800">
-              {filteredAccounts.map((acc) => (
-                <div key={acc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-indigo-600/10 text-indigo-400 rounded-xl flex items-center justify-center font-bold">
-                      {acc.name[0]?.toUpperCase()}
+              {filteredAccounts.length === 0 ? (
+                <p className="p-6 text-sm text-slate-500">No matching accounts found.</p>
+              ) : (
+                filteredAccounts.map((acc) => (
+                  <div key={acc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-indigo-600/10 text-indigo-400 rounded-xl flex items-center justify-center font-bold">
+                        {acc.name[0]?.toUpperCase()}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-white text-sm">{acc.name}</h4>
+                        <p className="text-xs text-slate-400">{acc.username}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-semibold text-white text-sm">{acc.name}</h4>
-                      <p className="text-xs text-slate-400">{acc.username}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-3 py-1 bg-slate-950 text-slate-400 rounded-lg border border-slate-800">{acc.category}</span>
+                      <button
+                        onClick={() => handleCopy(acc.id, acc.password)}
+                        title="Copy Password"
+                        className="p-2 text-slate-400 hover:text-white bg-slate-950 rounded-lg border border-slate-800"
+                      >
+                        {copiedId === acc.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAccount(acc.id)}
+                        title="Delete"
+                        className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 rounded-lg border border-slate-800"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs px-3 py-1 bg-slate-950 text-slate-400 rounded-lg border border-slate-800">{acc.category}</span>
-                    <button
-                      onClick={() => handleCopy(acc.id, acc.password)}
-                      title="Copy Password"
-                      className="p-2 text-slate-400 hover:text-white bg-slate-950 rounded-lg border border-slate-800"
-                    >
-                      {copiedId === acc.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteAccount(acc.id)}
-                      title="Delete"
-                      className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 rounded-lg border border-slate-800"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         )}
 
         {activeTab === 'experiments' && (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {vaultData.experiments.map((exp) => (
-              <div key={exp.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full">{exp.category}</span>
-                  <span className="text-xs font-semibold text-amber-400">★ {exp.rating}/5</span>
+          <div className="grid md:grid-cols-2 gap-4">
+            {filteredExperiments.length === 0 ? (
+              <p className="text-sm text-slate-500">No experiments logged yet.</p>
+            ) : (
+              filteredExperiments.map((exp) => (
+                <div key={exp.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg">{exp.category}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">{exp.tool}</span>
+                      <button
+                        onClick={() => handleDeleteExperiment(exp.id)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <h4 className="font-bold text-white text-base">{exp.name}</h4>
+                  <p className="text-xs text-slate-400 leading-relaxed">{exp.notes}</p>
                 </div>
-                <div>
-                  <h3 className="font-bold text-white text-lg">{exp.name}</h3>
-                  <p className="text-xs text-indigo-400 mt-0.5">Tool: {exp.tool}</p>
-                </div>
-                <p className="text-sm text-slate-300 bg-slate-950 p-3 rounded-xl border border-slate-800">{exp.notes}</p>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
 
         {activeTab === 'documents' && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-800">
-              <h3 className="font-bold text-white">Identity & Documents</h3>
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="font-bold text-white">Identity & Academic Documents</h3>
+              <span className="text-xs text-slate-400">Expiry tracking</span>
             </div>
             <div className="divide-y divide-slate-800">
-              {vaultData.documents.map((doc) => (
-                <div key={doc.id} className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <FileText className="w-7 h-7 text-indigo-400" />
+              {filteredDocuments.length === 0 ? (
+                <p className="p-6 text-sm text-slate-500">No documents stored yet.</p>
+              ) : (
+                filteredDocuments.map((doc) => (
+                  <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all">
                     <div>
                       <h4 className="font-semibold text-white text-sm">{doc.title}</h4>
-                      <p className="text-xs text-slate-400">{doc.category} • Expiry: {doc.expiry}</p>
+                      <p className="text-xs text-slate-400">Category: {doc.category} • Expires: {doc.expiry}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg">
+                        {doc.status}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteDocument(doc.id)}
+                        className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 rounded-lg border border-slate-800"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    {doc.status}
-                  </span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         )}
 
         {activeTab === 'ai' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 max-w-2xl">
             <div className="flex items-center gap-3">
-              <Bot className="w-8 h-8 text-indigo-400" />
+              <div className="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl">
+                <Bot className="w-5 h-5" />
+              </div>
               <div>
-                <h3 className="font-bold text-white">VaultAI Local Assistant</h3>
-                <p className="text-xs text-slate-400">Queries decrypted metadata in memory without leaking secrets</p>
+                <h3 className="font-bold text-white">Local VaultAI Query</h3>
+                <p className="text-xs text-slate-400">Runs 100% locally in browser memory—zero raw data leaves your device</p>
               </div>
             </div>
-            <textarea
-              value={aiQuestion}
-              onChange={e => setAiQuestion(e.target.value)}
-              placeholder="Ask: Which documents are expiring? or How many accounts do I have?"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500 h-24 resize-none"
-            />
-            <button
-              onClick={handleRunAiSearch}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-medium flex items-center gap-2"
-            >
-              <Sparkles className="w-4 h-4" /> Ask VaultAI
-            </button>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Ask e.g. 'Which documents are expiring?' or 'List my accounts'"
+                value={aiQuestion}
+                onChange={(e) => setAiQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleRunAiSearch()}
+                className="flex-1 px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                onClick={handleRunAiSearch}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-medium"
+              >
+                Ask
+              </button>
+            </div>
             {aiReply && (
-              <div className="p-4 bg-indigo-600/10 border border-indigo-500/30 rounded-xl text-sm text-indigo-200">
+              <div className="p-4 bg-slate-950 border border-indigo-500/30 rounded-xl text-sm text-slate-200">
                 {aiReply}
               </div>
             )}
@@ -832,63 +1000,67 @@ export default function VaultOneApp() {
         )}
       </main>
 
-      {/* ADD NEW ITEM MODAL */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
-            <h3 className="text-lg font-bold text-white">Add Encrypted Item</h3>
-            <div className="grid grid-cols-3 gap-2">
-              {(['account', 'experiment', 'document'] as const).map(t => (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-lg">Add Encrypted Item</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-medium">
+              {(['account', 'experiment', 'document'] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setNewItemType(t)}
-                  className={`py-2 text-xs font-semibold rounded-lg capitalize ${newItemType === t ? 'bg-indigo-600 text-white' : 'bg-slate-950 text-slate-400'}`}
+                  className={`py-2 rounded-lg capitalize ${newItemType === t ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
                 >
                   {t}
                 </button>
               ))}
             </div>
+
             <form onSubmit={handleAddItem} className="space-y-3">
               <input
                 type="text"
                 required
-                placeholder={newItemType === 'account' ? 'Service Name (e.g. Netflix)' : newItemType === 'experiment' ? 'Project Name' : 'Document Title'}
+                placeholder={newItemType === 'account' ? 'Service Name (e.g. Gmail)' : newItemType === 'experiment' ? 'Experiment Name' : 'Document Title'}
                 value={formField1}
-                onChange={e => setFormField1(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                onChange={(e) => setFormField1(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
               />
               <input
                 type="text"
-                placeholder={newItemType === 'account' ? 'Category (e.g. Social)' : newItemType === 'experiment' ? 'Tool Used (e.g. Next.js)' : 'Category (e.g. ID)'}
+                placeholder={newItemType === 'account' ? 'Category (e.g. Social, Bank)' : newItemType === 'experiment' ? 'Tool Used (e.g. Next.js, Supabase)' : 'Category (e.g. Identity, Education)'}
                 value={formField2}
-                onChange={e => setFormField2(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                onChange={(e) => setFormField2(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
               />
               <input
                 type="text"
-                placeholder={newItemType === 'account' ? 'Username / Email' : newItemType === 'experiment' ? 'Tag (e.g. AI)' : 'Expiry Date (YYYY-MM-DD)'}
+                placeholder={newItemType === 'account' ? 'Username / Email' : newItemType === 'experiment' ? 'Category' : 'Expiry Date (YYYY-MM-DD)'}
                 value={formField3}
-                onChange={e => setFormField3(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                onChange={(e) => setFormField3(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
               />
               {newItemType !== 'document' && (
                 <input
                   type={newItemType === 'account' ? 'password' : 'text'}
-                  placeholder={newItemType === 'account' ? 'Password to Encrypt' : 'Notes'}
+                  placeholder={newItemType === 'account' ? 'Password' : 'Notes'}
                   value={formField4}
-                  onChange={e => setFormField4(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white"
+                  onChange={(e) => setFormField4(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
                 />
               )}
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 text-xs text-slate-400 hover:text-white">
-                  Cancel
-                </button>
-                <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold">
-                  Encrypt & Save
-                </button>
-              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition-all"
+              >
+                Encrypt & Save to Cloud
+              </button>
             </form>
           </div>
         </div>
