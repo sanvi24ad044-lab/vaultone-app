@@ -4,9 +4,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   Shield, Key, Lock, Unlock, Search, Plus,
-  FileText, FolderGit2, Zap, Check, Copy, Bot,
-  ArrowRight, LogOut, UserPlus, LogIn, Trash2, Clock, ShieldCheck, AlertTriangle,
-  Cloud, Loader2, X, Eye, EyeOff, Globe, Mail
+  FileText, Zap, Check, Copy, Bot,
+  ArrowUpRight, LogOut, Trash2, AlertTriangle,
+  Loader2, X, Eye, EyeOff, Globe, Mail, Sun, Moon
 } from 'lucide-react';
 
 // --- SUPABASE CLIENT ---
@@ -112,7 +112,6 @@ interface VaultPayload {
   documents: DocumentItem[];
 }
 
-// Completely empty starter vault — zero dummy data for any user
 const EMPTY_VAULT: VaultPayload = {
   accounts: [],
   experiments: [],
@@ -120,13 +119,14 @@ const EMPTY_VAULT: VaultPayload = {
 };
 
 export default function VaultOneApp() {
-  // Auth & Lock States
+  // Dual Theme State: 'light' (Warm Cream & Champagne) | 'dark' (Deep Matte Charcoal & Warm Sand)
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
   const [stage, setStage] = useState<'auth' | 'pin_lock' | 'unlocked'>('auth');
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('');
   const [encryptedBlob, setEncryptedBlob] = useState<string>('');
 
-  // Form inputs for Layer 1 & Layer 2
   const [emailInput, setEmailInput] = useState('');
   const [accountPassInput, setAccountPassInput] = useState('');
   const [quickPinInput, setQuickPinInput] = useState('');
@@ -136,14 +136,12 @@ export default function VaultOneApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'local'>('synced');
 
-  // Vault Data (Held in RAM only while unlocked — strictly isolated per user)
   const [vaultData, setVaultData] = useState<VaultPayload>(EMPTY_VAULT);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
-  // Modal State for Adding Items
   const [showAddModal, setShowAddModal] = useState(false);
   const [newItemType, setNewItemType] = useState<'account' | 'experiment' | 'document'>('account');
   const [formField1, setFormField1] = useState('');
@@ -152,12 +150,52 @@ export default function VaultOneApp() {
   const [formField4, setFormField4] = useState('');
   const [formField5, setFormField5] = useState('');
 
-  // AI Query State
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiReply, setAiReply] = useState('');
 
-  // Timer ref for 5-second tab switch auto-lock
   const awayTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load saved theme preference
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('vaultone_theme');
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+      setTheme(savedTheme);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === 'light' ? 'dark' : 'light';
+    setTheme(next);
+    localStorage.setItem('vaultone_theme', next);
+  };
+
+  const isLight = theme === 'light';
+
+  // Reusable Theme Toggle Pill
+  const ThemeSwitcher = () => (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full font-mono-code text-[10px] uppercase tracking-[0.18em] border transition-all cursor-pointer ${
+        isLight
+          ? 'bg-[#EFE8DB] border-[#1F1915]/15 text-[#1F1915] hover:bg-[#E5DCCB]'
+          : 'bg-[#1B1917] border-[#E4D8C4]/15 text-[#E4D8C4] hover:bg-[#25221F]'
+      }`}
+      title="Switch between Warm Cream (Light) and Matte Charcoal (Dark)"
+    >
+      {isLight ? (
+        <>
+          <Moon className="w-3 h-3 text-[#8C6D38]" />
+          <span>DARK // CHARCOAL</span>
+        </>
+      ) : (
+        <>
+          <Sun className="w-3 h-3 text-[#E4D8C4]" />
+          <span>LIGHT // CREAM</span>
+        </>
+      )}
+    </button>
+  );
 
   // --- 5-SECOND TAB SWITCH / WINDOW BLUR AUTO-LOCK ---
   useEffect(() => {
@@ -169,7 +207,7 @@ export default function VaultOneApp() {
         setVisiblePasswords({});
         setActiveQuickPin('');
         setQuickPinInput('');
-        setLockReason('Auto-locked after 5 seconds away from tab for your privacy.');
+        setLockReason('SESSION PAUSED // AUTO-LOCKED AFTER 5S AWAY');
         setStage('pin_lock');
       }, 5000);
     };
@@ -182,11 +220,8 @@ export default function VaultOneApp() {
     };
 
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        startLockCountdown();
-      } else {
-        cancelLockCountdown();
-      }
+      if (document.hidden) startLockCountdown();
+      else cancelLockCountdown();
     };
 
     const handleWindowBlur = () => startLockCountdown();
@@ -204,17 +239,17 @@ export default function VaultOneApp() {
     };
   }, [stage]);
 
-  // --- LAYER 1: SIGN UP (Creates Private Empty Vault in Supabase) ---
+  // --- SIGN UP ---
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     const email = emailInput.trim().toLowerCase();
     if (!email || accountPassInput.length < 4 || quickPinInput.length < 4) {
-      setErrorMsg('Please enter an email and make both passwords at least 4 characters.');
+      setErrorMsg('Enter a valid email and passwords with at least 4 characters.');
       return;
     }
     if (accountPassInput === quickPinInput) {
-      setErrorMsg('For better security, make your Quick Unlock Password different from your Account Password.');
+      setErrorMsg('Keep your Quick Unlock PIN distinct from your Account Password.');
       return;
     }
 
@@ -232,7 +267,7 @@ export default function VaultOneApp() {
           .maybeSingle();
 
         if (existing) {
-          setErrorMsg('An account with this email already exists. Please Sign In.');
+          setErrorMsg('Account already exists. Please Sign In.');
           setIsLoading(false);
           return;
         }
@@ -263,13 +298,13 @@ export default function VaultOneApp() {
       setQuickPinInput('');
       setStage('unlocked');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to create cloud vault.');
+      setErrorMsg(err.message || 'Failed to initialize vault.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // --- LAYER 1: SIGN IN (Fetches Only This User's Encrypted Vault) ---
+  // --- SIGN IN ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -290,7 +325,7 @@ export default function VaultOneApp() {
 
         if (error) throw new Error(error.message);
         if (!data) {
-          setErrorMsg('No account found with that email. Please Create Account first.');
+          setErrorMsg('No vault found for this email. Create an account first.');
           setIsLoading(false);
           return;
         }
@@ -303,7 +338,7 @@ export default function VaultOneApp() {
         const users = JSON.parse(localStorage.getItem('vaultone_users') || '{}');
         const userRecord = users[email];
         if (!userRecord) {
-          setErrorMsg('No account found with that email. Please Sign Up first.');
+          setErrorMsg('No vault found for this email. Create an account first.');
           setIsLoading(false);
           return;
         }
@@ -315,7 +350,7 @@ export default function VaultOneApp() {
 
       const enteredHash = await hashText(accountPassInput);
       if (enteredHash !== accountPassHash) {
-        setErrorMsg('Incorrect Account Password.');
+        setErrorMsg('Incorrect account password.');
         setIsLoading(false);
         return;
       }
@@ -330,7 +365,7 @@ export default function VaultOneApp() {
       setCurrentUserEmail(email);
       setAccountPassInput('');
       setQuickPinInput('');
-      setLockReason('Account verified! Enter your Quick Unlock Password to decrypt your private vault.');
+      setLockReason('IDENTITY VERIFIED // ENTER PIN TO DECRYPT');
       setStage('pin_lock');
     } catch (err: any) {
       setErrorMsg(err.message || 'Unable to reach cloud vault.');
@@ -339,7 +374,7 @@ export default function VaultOneApp() {
     }
   };
 
-  // --- LAYER 2: QUICK UNLOCK (Decrypts Only Current User's Vault Locally in RAM) ---
+  // --- QUICK UNLOCK ---
   const handleQuickUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -383,13 +418,13 @@ export default function VaultOneApp() {
       setLockReason('');
       setStage('unlocked');
     } catch {
-      setErrorMsg('Wrong Quick Unlock Password. Unable to decrypt vault.');
+      setErrorMsg('Invalid PIN. Decryption rejected.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // --- SAVE ENCRYPTED VAULT TO SUPABASE + LOCALSTORAGE ---
+  // --- PERSIST ---
   const persistVault = async (updated: VaultPayload) => {
     setVaultData(updated);
     if (!currentUserEmail || !activeQuickPin) return;
@@ -419,13 +454,12 @@ export default function VaultOneApp() {
     }
   };
 
-  // --- MANUAL LOCK & FULL LOGOUT ---
   const handleQuickLock = () => {
     setVaultData(EMPTY_VAULT);
     setVisiblePasswords({});
     setActiveQuickPin('');
     setQuickPinInput('');
-    setLockReason('Vault locked manually.');
+    setLockReason('LOCKED MANUALLY // MEMORY WIPED');
     setStage('pin_lock');
   };
 
@@ -442,7 +476,6 @@ export default function VaultOneApp() {
     setStage('auth');
   };
 
-  // --- ADD / DELETE VAULT ITEMS ---
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formField1.trim()) return;
@@ -458,7 +491,7 @@ export default function VaultOneApp() {
       updated.accounts.push({
         id,
         name: formField1.trim(),
-        category: formField2.trim() || 'Website / App',
+        category: formField2.trim() || 'PLATFORM',
         username: formField3.trim(),
         password: formField4,
         siteUrl: formField5.trim(),
@@ -467,19 +500,19 @@ export default function VaultOneApp() {
       updated.experiments.push({
         id,
         name: formField1.trim(),
-        tool: formField2.trim() || 'Custom Tool',
-        category: formField3.trim() || 'Project',
-        status: 'Active',
+        tool: formField2.trim() || 'NOTE',
+        category: formField3.trim() || 'PERSONAL',
+        status: 'ACTIVE',
         rating: 5,
-        notes: formField4.trim() || 'Saved in private VaultOne Lab.',
+        notes: formField4.trim() || 'Stored privately in VaultOne.',
       });
     } else if (newItemType === 'document') {
       updated.documents.push({
         id,
         title: formField1.trim(),
-        category: formField2.trim() || 'Personal',
-        expiry: formField3.trim() || 'No Expiry',
-        status: 'Valid',
+        category: formField2.trim() || 'ID',
+        expiry: formField3.trim() || 'NO EXPIRY',
+        status: 'VERIFIED',
       });
     }
 
@@ -493,18 +526,15 @@ export default function VaultOneApp() {
   };
 
   const handleDeleteAccount = async (id: string) => {
-    const updated = { ...vaultData, accounts: vaultData.accounts.filter(a => a.id !== id) };
-    await persistVault(updated);
+    await persistVault({ ...vaultData, accounts: vaultData.accounts.filter(a => a.id !== id) });
   };
 
   const handleDeleteExperiment = async (id: string) => {
-    const updated = { ...vaultData, experiments: vaultData.experiments.filter(e => e.id !== id) };
-    await persistVault(updated);
+    await persistVault({ ...vaultData, experiments: vaultData.experiments.filter(e => e.id !== id) });
   };
 
   const handleDeleteDocument = async (id: string) => {
-    const updated = { ...vaultData, documents: vaultData.documents.filter(d => d.id !== id) };
-    await persistVault(updated);
+    await persistVault({ ...vaultData, documents: vaultData.documents.filter(d => d.id !== id) });
   };
 
   const handleCopy = (id: string, val: string) => {
@@ -522,162 +552,354 @@ export default function VaultOneApp() {
     const q = aiQuestion.toLowerCase();
     if (q.includes('gmail') || q.includes('email') || q.includes('where') || q.includes('site') || q.includes('account') || q.includes('login') || q.includes('password')) {
       if (vaultData.accounts.length === 0) {
-        setAiReply('You have not saved any website or app logins in your vault yet.');
+        setAiReply('ZERO LOGINS SAVED YET // TAP "+ NEW ENTRY" TO RECORD YOUR FIRST SITE.');
       } else {
         const list = vaultData.accounts
-          .map(a => `${a.name} (ID/Gmail: ${a.username}${a.siteUrl ? ` • ${a.siteUrl}` : ''})`)
-          .join('; ');
-        setAiReply(`You have signed into ${vaultData.accounts.length} place(s): ${list}. Open "Accounts & Passwords" and click the Eye icon to view any password.`);
+          .map(a => `${a.name.toUpperCase()} (${a.username}${a.siteUrl ? ` → ${a.siteUrl}` : ''})`)
+          .join('  //  ');
+        setAiReply(`ACTIVE FOOTPRINT [${vaultData.accounts.length}]: ${list}`);
       }
     } else if (q.includes('expir') || q.includes('document') || q.includes('id')) {
-      const docs = vaultData.documents.map(d => `${d.title} (Expires: ${d.expiry})`).join(', ');
-      setAiReply(`You have ${vaultData.documents.length} saved document(s): ${docs || 'None yet'}.`);
+      const docs = vaultData.documents.map(d => `${d.title} [${d.expiry}]`).join(' // ');
+      setAiReply(`STORED DOCS [${vaultData.documents.length}]: ${docs || 'NONE YET'}`);
     } else {
-      setAiReply(`Private Vault for ${currentUserEmail}: ${vaultData.accounts.length} Saved Logins, ${vaultData.experiments.length} Lab Notes, and ${vaultData.documents.length} Documents.`);
+      setAiReply(`VAULT SUMMARY // ${vaultData.accounts.length} LOGINS • ${vaultData.documents.length} DOCS • ${vaultData.experiments.length} NOTES`);
     }
   };
 
   // =========================================================================
-  // SCREEN 1: LAYER 1 AUTHENTICATION (ACCOUNT SIGN UP / SIGN IN)
+  // SCREEN 1: AUTHENTICATION (WARM CREAM IN LIGHT MODE / MATTE CHARCOAL IN DARK)
   // =========================================================================
   if (stage === 'auth') {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
-              <Shield className="w-8 h-8 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-white">VaultOne</h1>
-            <p className="text-xs text-slate-400">Private Zero-Knowledge Password & Login Tracker</p>
+      <div
+        className={`min-h-screen relative overflow-hidden flex flex-col justify-between p-6 md:p-10 transition-colors duration-300 ${
+          isLight ? 'theme-cream-bg text-[#1F1915]' : 'theme-charcoal-bg text-[#F3EFE8]'
+        }`}
+      >
+        {/* Behind-Print Architectural Watermark */}
+        <div className="pointer-events-none select-none fixed inset-0 flex flex-col justify-between overflow-hidden z-0">
+          <div
+            className={`font-display font-extrabold text-[17vw] leading-[0.84] tracking-tighter whitespace-nowrap -ml-3 ${
+              isLight ? 'text-[#1F1915]/[0.055]' : 'text-[#E4D8C4]/[0.045]'
+            }`}
+          >
+            VAULT // 01
           </div>
-
-          <div className="grid grid-cols-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button
-              type="button"
-              onClick={() => { setAuthMode('signup'); setErrorMsg(''); }}
-              className={`py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all ${authMode === 'signup' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              <UserPlus className="w-3.5 h-3.5" /> Create Account
-            </button>
-            <button
-              type="button"
-              onClick={() => { setAuthMode('login'); setErrorMsg(''); }}
-              className={`py-2 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all ${authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
-              <LogIn className="w-3.5 h-3.5" /> Sign In
-            </button>
+          <div
+            className={`font-display font-extrabold text-[15vw] leading-[0.84] tracking-tighter whitespace-nowrap self-end -mr-4 ${
+              isLight ? 'text-[#B5945B]/[0.09]' : 'text-[#97A88E]/[0.04]'
+            }`}
+          >
+            ZERO—KNOWLEDGE
           </div>
-
-          {errorMsg && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-400 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" /> {errorMsg}
-            </div>
-          )}
-
-          {authMode === 'signup' ? (
-            <form onSubmit={handleSignUp} className="space-y-4">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Your Personal Email Address</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="you@gmail.com"
-                  value={emailInput}
-                  onChange={e => setEmailInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">1. Account Sign-In Password</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Used when signing into your account"
-                  value={accountPassInput}
-                  onChange={e => setAccountPassInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-indigo-400 font-medium mb-1">2. Quick Vault Unlock Password / PIN</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Decrypts only your private vault"
-                  value={quickPinInput}
-                  onChange={e => setQuickPinInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-indigo-500/40 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
-              >
-                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating Private Vault...</> : 'Create Private Empty Vault'}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="you@gmail.com"
-                  value={emailInput}
-                  onChange={e => setEmailInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Account Sign-In Password</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Enter your account password"
-                  value={accountPassInput}
-                  onChange={e => setAccountPassInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
-              >
-                {isLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Fetching Your Vault...</> : 'Continue to Vault Unlock'}
-              </button>
-            </form>
-          )}
+          <div
+            className={`font-display font-extrabold text-[17vw] leading-[0.84] tracking-tighter whitespace-nowrap -ml-2 ${
+              isLight ? 'text-[#1F1915]/[0.05]' : 'text-[#E4D8C4]/[0.04]'
+            }`}
+          >
+            VAULT // 01
+          </div>
         </div>
+
+        {/* Top Bar with Theme Switcher */}
+        <header
+          className={`relative z-10 flex items-center justify-between pb-4 border-b ${
+            isLight ? 'border-[#1F1915]/10' : 'border-[#E4D8C4]/10'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isLight ? 'bg-[#B5945B]' : 'bg-[#97A88E]'
+              }`}
+            />
+            <span
+              className={`font-mono-code text-[11px] uppercase tracking-[0.25em] ${
+                isLight ? 'text-[#6E6256]' : 'text-[#9E9589]'
+              }`}
+            >
+              VAULTONE // SYS.2026
+            </span>
+          </div>
+          <ThemeSwitcher />
+        </header>
+
+        {/* Center Editorial Card */}
+        <div className="relative z-10 w-full max-w-[430px] mx-auto my-auto py-8">
+          <div
+            className={`rounded-[32px] p-7 md:p-8 border backdrop-blur-2xl transition-all duration-300 space-y-6 ${
+              isLight
+                ? 'bg-[#FBF8F2]/90 border-[#B5945B]/30 shadow-[0_24px_70px_rgba(31,25,21,0.10)]'
+                : 'bg-[#191816]/90 border-[#E4D8C4]/12 shadow-[0_24px_80px_rgba(0,0,0,0.75)]'
+            }`}
+          >
+            {/* Emblem & Title */}
+            <div className="text-center space-y-2">
+              <div
+                className={`w-13 h-13 rounded-2xl flex items-center justify-center mx-auto border ${
+                  isLight
+                    ? 'bg-gradient-to-br from-[#DFC99B] to-[#B5945B] border-[#9C7D46]/30 text-[#1F1915]'
+                    : 'bg-[#23211E] border-[#E4D8C4]/15 text-[#E4D8C4]'
+                }`}
+              >
+                <Shield className="w-6 h-6" />
+              </div>
+              <h1 className="font-display text-3xl font-extrabold tracking-tight">
+                VaultOne
+              </h1>
+              <p className={`text-xs ${isLight ? 'text-[#73675B]' : 'text-[#9A9185]'}`}>
+                Zero-Knowledge Cloud-Synced Personal Vault
+              </p>
+            </div>
+
+            {/* Pill Toggle */}
+            <div
+              className={`grid grid-cols-2 p-1 rounded-full border ${
+                isLight
+                  ? 'bg-[#1F1915] border-[#1F1915]/10'
+                  : 'bg-[#11100F] border-[#E4D8C4]/10'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => { setAuthMode('signup'); setErrorMsg(''); }}
+                className={`py-2 text-[11px] font-mono-code font-semibold uppercase tracking-wider rounded-full transition-all cursor-pointer ${
+                  authMode === 'signup'
+                    ? isLight
+                      ? 'bg-gradient-to-r from-[#DFC99B] to-[#C2A268] text-[#1F1915]'
+                      : 'bg-[#97A88E] text-[#121110]'
+                    : isLight
+                      ? 'text-[#EFE8DB]/80 hover:text-white'
+                      : 'text-[#9A9185] hover:text-[#F3EFE8]'
+                }`}
+              >
+                01. New Vault
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthMode('login'); setErrorMsg(''); }}
+                className={`py-2 text-[11px] font-mono-code font-semibold uppercase tracking-wider rounded-full transition-all cursor-pointer ${
+                  authMode === 'login'
+                    ? isLight
+                      ? 'bg-gradient-to-r from-[#DFC99B] to-[#C2A268] text-[#1F1915]'
+                      : 'bg-[#97A88E] text-[#121110]'
+                    : isLight
+                      ? 'text-[#EFE8DB]/80 hover:text-white'
+                      : 'text-[#9A9185] hover:text-[#F3EFE8]'
+                }`}
+              >
+                02. Sign In
+              </button>
+            </div>
+
+            {errorMsg && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-xs text-rose-500 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" /> {errorMsg}
+              </div>
+            )}
+
+            {authMode === 'signup' ? (
+              <form onSubmit={handleSignUp} className="space-y-4">
+                <div>
+                  <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-[#4D4339]' : 'text-[#B8AFA3]'}`}>
+                    Personal Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="you@gmail.com"
+                    value={emailInput}
+                    onChange={e => setEmailInput(e.target.value)}
+                    className={`w-full px-4 py-3 rounded-2xl text-sm border focus:outline-none transition-colors ${
+                      isLight
+                        ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                        : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#635C54] focus:border-[#E4D8C4]'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-[#4D4339]' : 'text-[#B8AFA3]'}`}>
+                    Account Sign-In Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={accountPassInput}
+                    onChange={e => setAccountPassInput(e.target.value)}
+                    className={`w-full px-4 py-3 rounded-2xl text-sm border focus:outline-none transition-colors ${
+                      isLight
+                        ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                        : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#635C54] focus:border-[#E4D8C4]'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-[#8C6D38]' : 'text-[#97A88E]'}`}>
+                    Master Decryption PIN
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Decrypts only your vault"
+                    value={quickPinInput}
+                    onChange={e => setQuickPinInput(e.target.value)}
+                    className={`w-full px-4 py-3 rounded-2xl text-sm border focus:outline-none transition-colors ${
+                      isLight
+                        ? 'bg-[#F3EDE2] border-[#B5945B]/40 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                        : 'bg-[#121110] border-[#97A88E]/30 text-[#F3EFE8] placeholder:text-[#635C54] focus:border-[#97A88E]'
+                    }`}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className={`w-full py-3.5 rounded-full font-display font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer mt-2 ${
+                    isLight
+                      ? 'bg-[#1F1915] hover:bg-[#332A24] text-[#FBF8F2]'
+                      : 'bg-[#E4D8C4] hover:bg-[#EFE6D6] text-[#121110]'
+                  }`}
+                >
+                  {isLoading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Initializing...</>
+                  ) : (
+                    <>Initialize Private Vault <ArrowUpRight className="w-4 h-4" /></>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-[#4D4339]' : 'text-[#B8AFA3]'}`}>
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="you@gmail.com"
+                    value={emailInput}
+                    onChange={e => setEmailInput(e.target.value)}
+                    className={`w-full px-4 py-3 rounded-2xl text-sm border focus:outline-none transition-colors ${
+                      isLight
+                        ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                        : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#635C54] focus:border-[#E4D8C4]'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-[#4D4339]' : 'text-[#B8AFA3]'}`}>
+                    Account Sign-In Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={accountPassInput}
+                    onChange={e => setAccountPassInput(e.target.value)}
+                    className={`w-full px-4 py-3 rounded-2xl text-sm border focus:outline-none transition-colors ${
+                      isLight
+                        ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                        : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#635C54] focus:border-[#E4D8C4]'
+                    }`}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className={`w-full py-3.5 rounded-full font-display font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer mt-2 ${
+                    isLight
+                      ? 'bg-[#1F1915] hover:bg-[#332A24] text-[#FBF8F2]'
+                      : 'bg-[#E4D8C4] hover:bg-[#EFE6D6] text-[#121110]'
+                  }`}
+                >
+                  {isLoading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Fetching Vault...</>
+                  ) : (
+                    <>Continue to Vault Unlock <ArrowUpRight className="w-4 h-4" /></>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <footer
+          className={`relative z-10 flex items-center justify-between pt-4 border-t font-mono-code text-[10px] uppercase tracking-[0.2em] ${
+            isLight ? 'border-[#1F1915]/10 text-[#6E6256]' : 'border-[#E4D8C4]/10 text-[#8A8175]'
+          }`}
+        >
+          <span>ZERO-KNOWLEDGE CLOUD-SYNCED PERSONAL VAULT</span>
+          <span className="hidden sm:inline">5S AUTO-LOCK</span>
+        </footer>
       </div>
     );
   }
 
   // =========================================================================
-  // SCREEN 2: LAYER 2 QUICK UNLOCK (AFTER LOGIN OR 5-SECOND TAB SWITCH)
+  // SCREEN 2: LAYER 2 QUICK UNLOCK
   // =========================================================================
   if (stage === 'pin_lock') {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl text-center space-y-6">
-          <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto border border-amber-500/30">
-            <Lock className="w-8 h-8" />
+      <div
+        className={`min-h-screen relative overflow-hidden flex flex-col justify-between p-6 md:p-10 transition-colors duration-300 ${
+          isLight ? 'theme-cream-bg text-[#1F1915]' : 'theme-charcoal-bg text-[#F3EFE8]'
+        }`}
+      >
+        <div className="pointer-events-none select-none fixed inset-0 flex items-center justify-center z-0">
+          <span
+            className={`font-display font-extrabold text-[19vw] tracking-tighter ${
+              isLight ? 'text-[#1F1915]/[0.05]' : 'text-[#E4D8C4]/[0.04]'
+            }`}
+          >
+            VAULT // 01
+          </span>
+        </div>
+
+        <header className="relative z-10 flex justify-end">
+          <ThemeSwitcher />
+        </header>
+
+        <div
+          className={`relative z-10 w-full max-w-[400px] mx-auto my-auto rounded-[32px] p-8 border backdrop-blur-2xl text-center space-y-6 ${
+            isLight
+              ? 'bg-[#FBF8F2]/90 border-[#B5945B]/30 shadow-[0_24px_70px_rgba(31,25,21,0.10)]'
+              : 'bg-[#191816]/90 border-[#E4D8C4]/12 shadow-[0_24px_80px_rgba(0,0,0,0.75)]'
+          }`}
+        >
+          <div
+            className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto border ${
+              isLight
+                ? 'bg-[#EFE8DB] border-[#B5945B]/35 text-[#8C6D38]'
+                : 'bg-[#23211E] border-[#97A88E]/30 text-[#97A88E]'
+            }`}
+          >
+            <Lock className="w-6 h-6" />
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-white">Vault Screen Locked</h1>
-            <p className="text-xs text-slate-400 mt-1">{currentUserEmail}</p>
+
+          <div className="space-y-1.5">
+            <h1 className="font-display text-2xl font-extrabold tracking-tight">
+              VAULT SEALED
+            </h1>
+            <p className={`font-mono-code text-xs ${isLight ? 'text-[#73675B]' : 'text-[#9A9185]'}`}>
+              {currentUserEmail}
+            </p>
             {lockReason && (
-              <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 mt-3">
+              <div
+                className={`mt-3 px-3 py-2 rounded-2xl font-mono-code text-[10px] tracking-wider border ${
+                  isLight
+                    ? 'bg-[#EFE8DB] border-[#B5945B]/30 text-[#7A5E2E]'
+                    : 'bg-[#23211E] border-[#97A88E]/25 text-[#97A88E]'
+                }`}
+              >
                 {lockReason}
-              </p>
+              </div>
             )}
           </div>
 
           {errorMsg && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-400">
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-xs text-rose-500">
               {errorMsg}
             </div>
           )}
@@ -687,34 +909,46 @@ export default function VaultOneApp() {
               type="password"
               required
               autoFocus
-              placeholder="Enter Quick Unlock Password"
+              placeholder="ENTER MASTER PIN"
               value={quickPinInput}
               onChange={(e) => setQuickPinInput(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-center text-base tracking-widest text-white focus:outline-none focus:border-indigo-500"
+              className={`w-full px-4 py-3.5 rounded-2xl text-center font-mono-code text-sm tracking-[0.3em] border focus:outline-none ${
+                isLight
+                  ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                  : 'bg-[#121110] border-[#E4D8C4]/15 text-[#F3EFE8] placeholder:text-[#635C54] focus:border-[#E4D8C4]'
+              }`}
             />
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-medium rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 text-sm"
+              className={`w-full py-3.5 rounded-full font-display font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                isLight
+                  ? 'bg-[#1F1915] hover:bg-[#332A24] text-[#FBF8F2]'
+                  : 'bg-[#E4D8C4] hover:bg-[#EFE6D6] text-[#121110]'
+              }`}
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Unlock className="w-4 h-4" />}
-              Decrypt & Open My Vault
+              Decrypt Vault
             </button>
           </form>
 
           <button
             onClick={handleFullLogout}
-            className="text-xs text-slate-500 hover:text-slate-300 underline"
+            className={`font-mono-code text-[11px] uppercase tracking-widest transition-colors ${
+              isLight ? 'text-[#73675B] hover:text-[#1F1915]' : 'text-[#8A8175] hover:text-[#F3EFE8]'
+            }`}
           >
-            Sign out completely / Switch Account
+            ← Switch Account
           </button>
         </div>
+
+        <div />
       </div>
     );
   }
 
   // =========================================================================
-  // SCREEN 3: UNLOCKED PRIVATE VAULT COMMAND CENTER
+  // SCREEN 3: UNLOCKED COMMAND CENTER (WARM CREAM OR MATTE CHARCOAL)
   // =========================================================================
   const filteredAccounts = vaultData.accounts.filter(a =>
     a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -735,183 +969,349 @@ export default function VaultOneApp() {
   const uniqueEmailsUsed = Array.from(new Set(vaultData.accounts.map(a => a.username).filter(Boolean)));
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
-      <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between">
+    <div
+      className={`min-h-screen relative overflow-x-hidden flex flex-col lg:flex-row transition-colors duration-300 ${
+        isLight ? 'theme-cream-bg text-[#1F1915]' : 'theme-charcoal-bg text-[#F3EFE8]'
+      }`}
+    >
+      {/* Subtle Behind-Print Watermark */}
+      <div className="pointer-events-none select-none fixed bottom-3 right-6 z-0 hidden xl:block">
+        <span
+          className={`font-display font-extrabold text-[11vw] leading-none tracking-tighter ${
+            isLight ? 'text-[#1F1915]/[0.04]' : 'text-[#E4D8C4]/[0.035]'
+          }`}
+        >
+          VAULT // 01
+        </span>
+      </div>
+
+      {/* Minimalist Sidebar */}
+      <aside
+        className={`relative z-10 w-full lg:w-64 p-5 lg:p-6 flex flex-col justify-between border-b lg:border-b-0 lg:border-r backdrop-blur-xl transition-colors ${
+          isLight
+            ? 'bg-[#F3EDE2]/90 border-[#1F1915]/10'
+            : 'bg-[#171614]/90 border-[#E4D8C4]/10'
+        }`}
+      >
         <div className="space-y-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-600/30">
-              <Shield className="w-6 h-6 text-white" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center font-display font-extrabold text-xs shrink-0 border ${
+                  isLight
+                    ? 'bg-gradient-to-br from-[#DFC99B] to-[#B5945B] border-[#9C7D46]/30 text-[#1F1915]'
+                    : 'bg-[#23211E] border-[#E4D8C4]/15 text-[#E4D8C4]'
+                }`}
+              >
+                V1
+              </div>
+              <div className="overflow-hidden">
+                <h2 className="font-display font-extrabold text-base tracking-tight leading-none">
+                  VaultOne
+                </h2>
+                <span
+                  className={`font-mono-code text-[10px] truncate block mt-1 max-w-[140px] ${
+                    isLight ? 'text-[#8C6D38]' : 'text-[#97A88E]'
+                  }`}
+                >
+                  {currentUserEmail}
+                </span>
+              </div>
             </div>
-            <div className="overflow-hidden">
-              <h2 className="font-bold text-lg text-white leading-none">VaultOne</h2>
-              <span className="text-xs text-emerald-400 font-medium truncate block mt-1">{currentUserEmail}</span>
+            <div className="lg:hidden">
+              <ThemeSwitcher />
             </div>
           </div>
 
-          <nav className="space-y-1">
+          <nav className="flex lg:flex-col gap-1.5 overflow-x-auto pb-1 lg:pb-0">
             {[
-              { id: 'dashboard', label: 'Dashboard', icon: Shield },
-              { id: 'accounts', label: 'Accounts & Passwords', icon: Key },
-              { id: 'experiments', label: 'Personal Notes & Lab', icon: Zap },
-              { id: 'documents', label: 'Document & Identity', icon: FileText },
-              { id: 'ai', label: 'VaultAI Assistant', icon: Bot },
+              { id: 'dashboard', num: '01', label: 'Dashboard', icon: Shield },
+              { id: 'accounts', num: '02', label: 'Accounts & Passwords', icon: Key },
+              { id: 'documents', num: '03', label: 'Document & Identity', icon: FileText },
+              { id: 'experiments', num: '04', label: 'Private Notes', icon: Zap },
+              { id: 'ai', num: '05', label: 'VaultAI Assistant', icon: Bot },
             ].map((tab) => {
               const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                  className={`flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs font-medium transition-all shrink-0 cursor-pointer ${
+                    isActive
+                      ? isLight
+                        ? 'bg-[#E5DAC7] text-[#1F1915] font-semibold shadow-xs'
+                        : 'bg-[#262420] text-[#F3EFE8] font-semibold border border-[#E4D8C4]/15'
+                      : isLight
+                        ? 'text-[#6E6256] hover:bg-[#1F1915]/[0.04] hover:text-[#1F1915]'
+                        : 'text-[#8E8579] hover:bg-[#E4D8C4]/[0.04] hover:text-[#F3EFE8]'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
-                  {tab.label}
+                  <span className="flex items-center gap-2.5">
+                    <Icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </span>
+                  <span
+                    className={`font-mono-code text-[10px] hidden lg:inline ${
+                      isActive
+                        ? isLight ? 'text-[#8C6D38]' : 'text-[#97A88E]'
+                        : 'opacity-45'
+                    }`}
+                  >
+                    {tab.num}
+                  </span>
                 </button>
               );
             })}
           </nav>
         </div>
 
-        <div className="pt-6 border-t border-slate-800 space-y-2">
-          <div className="flex items-center gap-2 text-[11px] text-slate-400 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-            <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>Auto-locks 5s after leaving tab</span>
+        <div
+          className={`hidden lg:flex flex-col gap-2.5 pt-6 border-t ${
+            isLight ? 'border-[#1F1915]/10' : 'border-[#E4D8C4]/10'
+          }`}
+        >
+          <div className="flex justify-center">
+            <ThemeSwitcher />
+          </div>
+          <div
+            className={`flex items-center justify-between px-3 py-2 rounded-xl font-mono-code text-[10px] border ${
+              isLight
+                ? 'bg-[#FBF8F2] border-[#1F1915]/10 text-[#6E6256]'
+                : 'bg-[#121110] border-[#E4D8C4]/10 text-[#8E8579]'
+            }`}
+          >
+            <span>AUTO-LOCK</span>
+            <span className={isLight ? 'text-[#8C6D38] font-semibold' : 'text-[#97A88E] font-semibold'}>
+              5.0 SEC
+            </span>
           </div>
           <button
             onClick={handleQuickLock}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium transition-all"
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-xs font-mono-code uppercase tracking-wider transition-all cursor-pointer border ${
+              isLight
+                ? 'bg-[#FBF8F2] hover:bg-[#EAE2D3] border-[#1F1915]/15 text-[#1F1915]'
+                : 'bg-[#23211E] hover:bg-[#2E2B27] border-[#E4D8C4]/12 text-[#E4D8C4]'
+            }`}
           >
-            <Lock className="w-3.5 h-3.5" /> Quick Lock Screen
+            <Lock className="w-3.5 h-3.5" /> Lock Screen
           </button>
           <button
             onClick={handleFullLogout}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-medium transition-all"
+            className={`w-full flex items-center justify-center gap-2 px-4 py-1.5 rounded-full text-[11px] font-mono-code uppercase tracking-wider transition-all cursor-pointer ${
+              isLight ? 'text-[#73675B] hover:text-rose-600' : 'text-[#8E8579] hover:text-rose-400'
+            }`}
           >
-            <LogOut className="w-3.5 h-3.5" /> Sign Out Account
+            <LogOut className="w-3.5 h-3.5" /> Sign Out
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 p-6 md:p-10 space-y-8 overflow-y-auto">
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+      {/* Main Content */}
+      <main className="relative z-10 flex-1 p-5 md:p-8 lg:p-10 space-y-8 max-w-6xl">
+        {/* Top Bar */}
+        <header
+          className={`flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b ${
+            isLight ? 'border-[#1F1915]/10' : 'border-[#E4D8C4]/10'
+          }`}
+        >
           <div>
-            <h1 className="text-2xl font-bold text-white capitalize">{activeTab}</h1>
-            <div className="flex flex-wrap items-center gap-3 mt-1">
-              <p className="text-xs text-emerald-400 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4" /> Private to {currentUserEmail} (AES-256-GCM)
-              </p>
-              <span className="text-slate-700">•</span>
-              <p className="text-xs text-sky-400 flex items-center gap-1.5">
-                <Cloud className="w-3.5 h-3.5" />
-                {syncStatus === 'syncing' ? 'Syncing to Supabase...' : syncStatus === 'synced' ? 'Synced to Cloud' : 'Saved Locally'}
-              </p>
+            <div
+              className={`flex items-center gap-2 font-mono-code text-[10px] uppercase tracking-[0.2em] ${
+                isLight ? 'text-[#6E6256]' : 'text-[#8E8579]'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-[#B5945B]' : 'bg-[#97A88E]'}`} />
+              <span>ENCRYPTED LOCALLY WITH AES-256-GCM</span>
+              <span>•</span>
+              <span className={isLight ? 'text-[#8C6D38] font-semibold' : 'text-[#97A88E] font-semibold'}>
+                {syncStatus === 'syncing' ? 'SYNCING...' : syncStatus === 'synced' ? 'SYNCED TO CLOUD' : 'SAVED LOCALLY'}
+              </span>
             </div>
+            <h1 className="font-display text-3xl md:text-4xl font-extrabold tracking-tight uppercase mt-1">
+              {activeTab === 'dashboard' ? 'COMMAND CENTER' : activeTab}
+            </h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex-1 md:w-56">
+              <Search
+                className={`w-3.5 h-3.5 absolute left-3.5 top-1/2 -translate-y-1/2 ${
+                  isLight ? 'text-[#8C7E70]' : 'text-[#756D63]'
+                }`}
+              />
               <input
                 type="text"
-                placeholder="Search site, Gmail, ID..."
+                placeholder="Search site, Gmail..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500 w-56"
+                className={`w-full pl-9 pr-4 py-2.5 rounded-full text-xs border focus:outline-none ${
+                  isLight
+                    ? 'bg-[#FBF8F2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                    : 'bg-[#191816] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359] focus:border-[#E4D8C4]'
+                }`}
               />
             </div>
             <button
               onClick={() => { setNewItemType('account'); setShowAddModal(true); }}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-indigo-600/20"
+              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-display font-bold uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+                isLight
+                  ? 'bg-[#1F1915] hover:bg-[#332A24] text-[#FBF8F2]'
+                  : 'bg-[#E4D8C4] hover:bg-[#EFE6D6] text-[#121110]'
+              }`}
             >
-              <Plus className="w-4 h-4" /> Save Login / Item
+              <Plus className="w-4 h-4" /> New Entry
             </button>
           </div>
         </header>
 
+        {/* OVERVIEW / DASHBOARD */}
         {activeTab === 'dashboard' && (
           <div className="space-y-8">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* 4 Bento Metric Tiles */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
               {[
-                { label: 'Sites / Logins Saved', val: vaultData.accounts.length, icon: Key, color: 'text-indigo-400' },
-                { label: 'Gmail / IDs Used', val: uniqueEmailsUsed.length, icon: Mail, color: 'text-sky-400' },
-                { label: 'Identity Docs', val: vaultData.documents.length, icon: FolderGit2, color: 'text-blue-400' },
-                { label: 'Private Notes', val: vaultData.experiments.length, icon: Zap, color: 'text-amber-400' },
+                { code: '/01', label: 'SITES SAVED', val: vaultData.accounts.length, icon: Key },
+                { code: '/02', label: 'GMAIL / IDS', val: uniqueEmailsUsed.length, icon: Mail },
+                { code: '/03', label: 'ID DOCS', val: vaultData.documents.length, icon: FileText },
+                { code: '/04', label: 'NOTES', val: vaultData.experiments.length, icon: Zap },
               ].map((m, idx) => {
                 const Icon = m.icon;
                 return (
-                  <div key={idx} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex items-center gap-4">
-                    <div className={`p-3 bg-slate-950 rounded-xl ${m.color}`}>
-                      <Icon className="w-6 h-6" />
+                  <div
+                    key={idx}
+                    className={`p-5 rounded-3xl border flex flex-col justify-between h-32 transition-all ${
+                      isLight
+                        ? 'bg-[#EFE8DB]/85 border-[#1F1915]/10 hover:border-[#B5945B]/50'
+                        : 'bg-[#1B1917]/90 border-[#E4D8C4]/10 hover:border-[#E4D8C4]/30'
+                    }`}
+                  >
+                    <div
+                      className={`flex items-center justify-between font-mono-code text-[10px] tracking-[0.18em] ${
+                        isLight ? 'text-[#6E6256]' : 'text-[#9A9185]'
+                      }`}
+                    >
+                      <span>{m.label}</span>
+                      <span>{m.code}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-slate-400 font-medium">{m.label}</p>
-                      <p className="text-2xl font-bold text-white mt-0.5">{m.val}</p>
+                    <div className="flex items-end justify-between">
+                      <p
+                        className={`font-display text-3xl md:text-4xl font-extrabold ${
+                          isLight ? 'text-[#B5945B]' : 'text-[#E4D8C4]'
+                        }`}
+                      >
+                        {m.val}
+                      </p>
+                      <Icon className={`w-5 h-5 ${isLight ? 'text-[#1F1915]/65' : 'text-[#E4D8C4]/55'}`} />
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            {/* Where You Have Signed In */}
+            <section className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Key className="w-5 h-5 text-indigo-400" /> Where You Have Signed In
+                <h3 className="font-display text-xl font-bold tracking-tight">
+                  Where You Have Signed In
                 </h3>
-                <button onClick={() => setActiveTab('accounts')} className="text-xs text-indigo-400 hover:underline flex items-center gap-1">
-                  Manage & View Passwords <ArrowRight className="w-3 h-3" />
+                <button
+                  onClick={() => setActiveTab('accounts')}
+                  className={`font-mono-code text-[11px] uppercase tracking-wider flex items-center gap-1 cursor-pointer ${
+                    isLight ? 'text-[#8C6D38] hover:text-[#1F1915]' : 'text-[#97A88E] hover:text-[#F3EFE8]'
+                  }`}
+                >
+                  VIEW ALL <ArrowUpRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {vaultData.accounts.length === 0 ? (
-                <div className="bg-slate-950 border border-dashed border-slate-800 rounded-xl p-8 text-center space-y-3">
-                  <p className="text-sm text-slate-300 font-medium">Your private vault is completely empty.</p>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    Click <strong>Save Login / Item</strong> to record which websites or apps you signed into, which Gmail or username you used, and the password you set. Only you can see this.
+                <div
+                  className={`border border-dashed rounded-3xl p-10 text-center space-y-3 ${
+                    isLight
+                      ? 'bg-[#FBF8F2]/70 border-[#1F1915]/15'
+                      : 'bg-[#191816]/70 border-[#E4D8C4]/15'
+                  }`}
+                >
+                  <p className="font-display text-base font-bold">
+                    Your private vault is empty.
+                  </p>
+                  <p className={`text-xs max-w-md mx-auto ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                    Tap <strong>New Entry</strong> to save any website, app, Gmail ID, and password. Everything stays encrypted and isolated to {currentUserEmail}.
                   </p>
                   <button
                     onClick={() => { setNewItemType('account'); setShowAddModal(true); }}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                    className={`inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full text-xs font-display font-bold uppercase tracking-wider mt-2 cursor-pointer ${
+                      isLight
+                        ? 'bg-[#1F1915] text-[#FBF8F2]'
+                        : 'bg-[#E4D8C4] text-[#121110]'
+                    }`}
                   >
-                    <Plus className="w-4 h-4" /> Add Your First Website Login
+                    <Plus className="w-3.5 h-3.5" /> Add First Login
                   </button>
                 </div>
               ) : (
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {vaultData.accounts.map((acc) => (
-                    <div key={acc.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-2.5">
+                    <div
+                      key={acc.id}
+                      className={`p-5 rounded-3xl border space-y-3 transition-all ${
+                        isLight
+                          ? 'bg-[#231D18] border-[#1F1915] text-[#F6F2EA] shadow-sm'
+                          : 'bg-[#1B1917] border-[#E4D8C4]/15 text-[#F3EFE8]'
+                      }`}
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-white text-sm">{acc.name}</span>
-                        <span className="text-[11px] px-2.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg">{acc.category}</span>
+                        <span className="font-display font-bold text-base">{acc.name}</span>
+                        <span
+                          className={`font-mono-code text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                            isLight
+                              ? 'bg-[#DFC99B]/20 text-[#DFC99B]'
+                              : 'bg-[#97A88E]/15 text-[#97A88E]'
+                          }`}
+                        >
+                          {acc.category}
+                        </span>
                       </div>
-                      <p className="text-xs text-slate-300 flex items-center gap-1.5">
-                        <Mail className="w-3.5 h-3.5 text-slate-400" /> Signed in with: <span className="text-emerald-400 font-medium">{acc.username}</span>
-                      </p>
-                      {acc.siteUrl && (
-                        <p className="text-xs text-slate-400 flex items-center gap-1.5 truncate">
-                          <Globe className="w-3.5 h-3.5 text-slate-500 shrink-0" /> {acc.siteUrl}
+
+                      <div className="space-y-1">
+                        <p className="text-xs opacity-85 flex items-center gap-2">
+                          <Mail className={`w-3.5 h-3.5 ${isLight ? 'text-[#DFC99B]' : 'text-[#97A88E]'}`} />
+                          <span className="font-mono-code text-xs truncate">{acc.username}</span>
                         </p>
-                      )}
-                      <div className="pt-1 flex items-center justify-between border-t border-slate-900">
-                        <span className="text-xs font-mono text-slate-300">
+                        {acc.siteUrl && (
+                          <p className="text-[11px] opacity-55 flex items-center gap-2 truncate">
+                            <Globe className="w-3.5 h-3.5 shrink-0" />
+                            <span>{acc.siteUrl}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+                        <span className="font-mono-code text-xs tracking-wider">
                           {visiblePasswords[acc.id] ? acc.password : '••••••••••••'}
                         </span>
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => togglePasswordVisibility(acc.id)}
-                            className="p-1.5 text-slate-400 hover:text-white bg-slate-900 rounded-lg border border-slate-800"
-                            title={visiblePasswords[acc.id] ? 'Hide Password' : 'Show Password'}
+                            className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors cursor-pointer"
+                            title={visiblePasswords[acc.id] ? 'Hide Password' : 'Reveal Password'}
                           >
-                            {visiblePasswords[acc.id] ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5" />}
+                            {visiblePasswords[acc.id] ? (
+                              <EyeOff className={`w-3.5 h-3.5 ${isLight ? 'text-[#DFC99B]' : 'text-[#97A88E]'}`} />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
                           </button>
                           <button
                             onClick={() => handleCopy(acc.id, acc.password)}
-                            className="p-1.5 text-slate-400 hover:text-white bg-slate-900 rounded-lg border border-slate-800"
-                            title="Copy Password"
+                            className={`px-3 py-1 rounded-full font-mono-code text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                              isLight
+                                ? 'bg-[#DFC99B] text-[#1F1915] hover:bg-[#ead8b3]'
+                                : 'bg-[#E4D8C4] text-[#121110] hover:bg-white'
+                            }`}
                           >
-                            {copiedId === acc.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedId === acc.id ? 'COPIED' : 'COPY'}
                           </button>
                         </div>
                       </div>
@@ -923,61 +1323,115 @@ export default function VaultOneApp() {
           </div>
         )}
 
+        {/* ACCOUNTS & PASSWORDS TAB */}
         {activeTab === 'accounts' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+          <div
+            className={`rounded-3xl border overflow-hidden ${
+              isLight
+                ? 'bg-[#FBF8F2]/90 border-[#1F1915]/10'
+                : 'bg-[#191816]/90 border-[#E4D8C4]/10'
+            }`}
+          >
+            <div
+              className={`p-6 border-b flex items-center justify-between ${
+                isLight ? 'border-[#1F1915]/10' : 'border-[#E4D8C4]/10'
+              }`}
+            >
               <div>
-                <h3 className="font-bold text-white">Your Saved Logins, Gmail IDs & Passwords</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Click the eye icon to reveal the exact password you saved for any website</p>
+                <h3 className="font-display font-bold text-lg">Saved Logins & Passwords</h3>
+                <p className={`text-xs mt-0.5 ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                  Tap the eye icon to reveal any password you saved
+                </p>
               </div>
               <button
                 onClick={() => { setNewItemType('account'); setShowAddModal(true); }}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium flex items-center gap-1.5"
+                className={`px-4 py-2 rounded-full text-xs font-display font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer ${
+                  isLight ? 'bg-[#1F1915] text-[#FBF8F2]' : 'bg-[#E4D8C4] text-[#121110]'
+                }`}
               >
                 <Plus className="w-3.5 h-3.5" /> Add Login
               </button>
             </div>
-            <div className="divide-y divide-slate-800">
+            <div className={`divide-y ${isLight ? 'divide-[#1F1915]/10' : 'divide-[#E4D8C4]/10'}`}>
               {filteredAccounts.length === 0 ? (
-                <p className="p-6 text-sm text-slate-500">No saved logins yet. Click &ldquo;Add Login&rdquo; to save a website, Gmail ID, and password.</p>
+                <p className={`p-8 text-xs font-mono-code ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                  NO LOGINS SAVED YET.
+                </p>
               ) : (
                 filteredAccounts.map((acc) => (
-                  <div key={acc.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-800/30 transition-all">
+                  <div key={acc.id} className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-indigo-600/10 text-indigo-400 rounded-xl flex items-center justify-center font-bold shrink-0">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-sm shrink-0 ${
+                          isLight
+                            ? 'bg-[#EFE8DB] text-[#8C6D38] border border-[#B5945B]/30'
+                            : 'bg-[#23211E] text-[#E4D8C4] border border-[#E4D8C4]/15'
+                        }`}
+                      >
                         {acc.name[0]?.toUpperCase()}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="font-semibold text-white text-sm">{acc.name}</h4>
-                          <span className="text-[11px] px-2 py-0.5 bg-slate-950 text-slate-400 rounded-md border border-slate-800">{acc.category}</span>
+                          <h4 className="font-display font-bold text-sm">{acc.name}</h4>
+                          <span
+                            className={`font-mono-code text-[10px] px-2.5 py-0.5 rounded-full ${
+                              isLight ? 'bg-[#EFE8DB] text-[#6E6256]' : 'bg-[#23211E] text-[#9A9185]'
+                            }`}
+                          >
+                            {acc.category}
+                          </span>
                         </div>
-                        <p className="text-xs text-emerald-400 mt-0.5">ID / Gmail: {acc.username}</p>
-                        {acc.siteUrl && <p className="text-[11px] text-slate-500">{acc.siteUrl}</p>}
+                        <p className={`font-mono-code text-xs mt-0.5 ${isLight ? 'text-[#8C6D38]' : 'text-[#97A88E]'}`}>
+                          {acc.username}
+                        </p>
+                        {acc.siteUrl && (
+                          <p className={`font-mono-code text-[11px] ${isLight ? 'text-[#8C7E70]' : 'text-[#6B6359]'}`}>
+                            {acc.siteUrl}
+                          </p>
+                        )}
                       </div>
                     </div>
+
                     <div className="flex items-center gap-2">
-                      <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 min-w-[140px] text-center">
+                      <div
+                        className={`px-3.5 py-2 rounded-full font-mono-code text-xs min-w-[140px] text-center border ${
+                          isLight
+                            ? 'bg-[#F3EDE2] border-[#1F1915]/12 text-[#1F1915]'
+                            : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8]'
+                        }`}
+                      >
                         {visiblePasswords[acc.id] ? acc.password : '••••••••••••'}
                       </div>
                       <button
                         onClick={() => togglePasswordVisibility(acc.id)}
-                        title={visiblePasswords[acc.id] ? 'Hide Password' : 'Reveal Password'}
-                        className="p-2 text-slate-400 hover:text-white bg-slate-950 rounded-lg border border-slate-800"
+                        className={`p-2 rounded-full border cursor-pointer ${
+                          isLight
+                            ? 'bg-[#EFE8DB] border-[#1F1915]/10 text-[#1F1915]'
+                            : 'bg-[#23211E] border-[#E4D8C4]/12 text-[#E4D8C4]'
+                        }`}
+                        title={visiblePasswords[acc.id] ? 'Hide' : 'Show'}
                       >
-                        {visiblePasswords[acc.id] ? <EyeOff className="w-4 h-4 text-amber-400" /> : <Eye className="w-4 h-4" />}
+                        {visiblePasswords[acc.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                       <button
                         onClick={() => handleCopy(acc.id, acc.password)}
-                        title="Copy Password"
-                        className="p-2 text-slate-400 hover:text-white bg-slate-950 rounded-lg border border-slate-800"
+                        className={`p-2 rounded-full border cursor-pointer ${
+                          isLight
+                            ? 'bg-[#EFE8DB] border-[#1F1915]/10 text-[#1F1915]'
+                            : 'bg-[#23211E] border-[#E4D8C4]/12 text-[#E4D8C4]'
+                        }`}
+                        title="Copy"
                       >
-                        {copiedId === acc.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        {copiedId === acc.id ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
                       </button>
                       <button
                         onClick={() => handleDeleteAccount(acc.id)}
+                        className={`p-2 rounded-full border cursor-pointer hover:text-rose-500 ${
+                          isLight
+                            ? 'bg-[#EFE8DB] border-[#1F1915]/10 text-[#73675B]'
+                            : 'bg-[#23211E] border-[#E4D8C4]/12 text-[#8E8579]'
+                        }`}
                         title="Delete"
-                        className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 rounded-lg border border-slate-800"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -989,56 +1443,90 @@ export default function VaultOneApp() {
           </div>
         )}
 
+        {/* NOTES TAB */}
         {activeTab === 'experiments' && (
           <div className="grid md:grid-cols-2 gap-4">
             {filteredExperiments.length === 0 ? (
-              <p className="text-sm text-slate-500">No personal notes logged yet.</p>
+              <p className={`text-xs font-mono-code ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                NO PRIVATE NOTES YET.
+              </p>
             ) : (
               filteredExperiments.map((exp) => (
-                <div key={exp.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
+                <div
+                  key={exp.id}
+                  className={`p-5 rounded-3xl border space-y-3 ${
+                    isLight
+                      ? 'bg-[#FBF8F2] border-[#1F1915]/10'
+                      : 'bg-[#191816] border-[#E4D8C4]/10'
+                  }`}
+                >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg">{exp.category}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400">{exp.tool}</span>
-                      <button
-                        onClick={() => handleDeleteExperiment(exp.id)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    <span
+                      className={`font-mono-code text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full ${
+                        isLight ? 'bg-[#EFE8DB] text-[#8C6D38]' : 'bg-[#23211E] text-[#97A88E]'
+                      }`}
+                    >
+                      {exp.category}
+                    </span>
+                    <button
+                      onClick={() => handleDeleteExperiment(exp.id)}
+                      className="p-1.5 opacity-60 hover:text-rose-500 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <h4 className="font-bold text-white text-base">{exp.name}</h4>
-                  <p className="text-xs text-slate-400 leading-relaxed">{exp.notes}</p>
+                  <h4 className="font-display font-bold text-base">{exp.name}</h4>
+                  <p className={`text-xs leading-relaxed ${isLight ? 'text-[#6E6256]' : 'text-[#9A9185]'}`}>
+                    {exp.notes}
+                  </p>
                 </div>
               ))
             )}
           </div>
         )}
 
+        {/* DOCUMENTS TAB */}
         {activeTab === 'documents' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white">Identity & Academic Documents</h3>
-              <span className="text-xs text-slate-400">Private to your account</span>
+          <div
+            className={`rounded-3xl border overflow-hidden ${
+              isLight
+                ? 'bg-[#FBF8F2]/90 border-[#1F1915]/10'
+                : 'bg-[#191816]/90 border-[#E4D8C4]/10'
+            }`}
+          >
+            <div
+              className={`p-6 border-b flex items-center justify-between ${
+                isLight ? 'border-[#1F1915]/10' : 'border-[#E4D8C4]/10'
+              }`}
+            >
+              <h3 className="font-display font-bold text-lg">Identity & Personal Docs</h3>
+              <span className="font-mono-code text-[10px] uppercase tracking-widest opacity-60">ENCRYPTED</span>
             </div>
-            <div className="divide-y divide-slate-800">
+            <div className={`divide-y ${isLight ? 'divide-[#1F1915]/10' : 'divide-[#E4D8C4]/10'}`}>
               {filteredDocuments.length === 0 ? (
-                <p className="p-6 text-sm text-slate-500">No documents stored yet.</p>
+                <p className={`p-8 text-xs font-mono-code ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                  NO DOCUMENTS STORED YET.
+                </p>
               ) : (
                 filteredDocuments.map((doc) => (
-                  <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-all">
+                  <div key={doc.id} className="p-5 flex items-center justify-between">
                     <div>
-                      <h4 className="font-semibold text-white text-sm">{doc.title}</h4>
-                      <p className="text-xs text-slate-400">Category: {doc.category} • Expiry: {doc.expiry}</p>
+                      <h4 className="font-display font-bold text-sm">{doc.title}</h4>
+                      <p className={`font-mono-code text-[11px] mt-0.5 ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                        {doc.category} • EXP: {doc.expiry}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg">
+                      <span
+                        className={`font-mono-code text-[10px] px-2.5 py-1 rounded-full ${
+                          isLight ? 'bg-[#EFE8DB] text-[#8C6D38]' : 'bg-[#23211E] text-[#97A88E]'
+                        }`}
+                      >
                         {doc.status}
                       </span>
                       <button
                         onClick={() => handleDeleteDocument(doc.id)}
-                        className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 rounded-lg border border-slate-800"
+                        className="p-2 rounded-full opacity-60 hover:text-rose-500 cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1050,35 +1538,62 @@ export default function VaultOneApp() {
           </div>
         )}
 
+        {/* VAULTAI ASSISTANT TAB */}
         {activeTab === 'ai' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 max-w-2xl">
+          <div
+            className={`rounded-3xl border p-6 space-y-4 max-w-2xl ${
+              isLight
+                ? 'bg-[#FBF8F2]/90 border-[#1F1915]/10'
+                : 'bg-[#191816]/90 border-[#E4D8C4]/10'
+            }`}
+          >
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-indigo-600/20 text-indigo-400 rounded-xl">
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+                  isLight
+                    ? 'bg-[#EFE8DB] border-[#B5945B]/30 text-[#8C6D38]'
+                    : 'bg-[#23211E] border-[#97A88E]/30 text-[#97A88E]'
+                }`}
+              >
                 <Bot className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-white">Local VaultAI Query</h3>
-                <p className="text-xs text-slate-400">Searches only your decrypted vault in browser RAM</p>
+                <h3 className="font-display font-bold">Ask Vault // Local Query</h3>
+                <p className={`font-mono-code text-[11px] ${isLight ? 'text-[#73675B]' : 'text-[#8E8579]'}`}>
+                  Runs 100% locally in browser RAM
+                </p>
               </div>
             </div>
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Ask e.g. 'Where have I logged in?' or 'Which Gmail did I use?'"
+                placeholder="Ask: 'Where have I signed in?' or 'Which Gmail did I use?'"
                 value={aiQuestion}
                 onChange={(e) => setAiQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleRunAiSearch()}
-                className="flex-1 px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                className={`flex-1 px-4 py-3 rounded-full text-xs border focus:outline-none ${
+                  isLight
+                    ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80] focus:border-[#B5945B]'
+                    : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359] focus:border-[#E4D8C4]'
+                }`}
               />
               <button
                 onClick={handleRunAiSearch}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-medium"
+                className={`px-5 py-3 rounded-full font-display font-bold text-xs uppercase tracking-wider cursor-pointer ${
+                  isLight ? 'bg-[#1F1915] text-[#FBF8F2]' : 'bg-[#E4D8C4] text-[#121110]'
+                }`}
               >
-                Ask
+                Run
               </button>
             </div>
             {aiReply && (
-              <div className="p-4 bg-slate-950 border border-indigo-500/30 rounded-xl text-sm text-slate-200">
+              <div
+                className={`p-4 rounded-2xl font-mono-code text-xs leading-relaxed border ${
+                  isLight
+                    ? 'bg-[#EFE8DB] border-[#B5945B]/30 text-[#1F1915]'
+                    : 'bg-[#121110] border-[#97A88E]/30 text-[#97A88E]'
+                }`}
+              >
                 {aiReply}
               </div>
             )}
@@ -1086,25 +1601,42 @@ export default function VaultOneApp() {
         )}
       </main>
 
+      {/* ADD ENTRY MODAL */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div
+            className={`w-full max-w-md rounded-3xl p-6 space-y-5 border shadow-2xl ${
+              isLight
+                ? 'bg-[#FBF8F2] border-[#B5945B]/30 text-[#1F1915]'
+                : 'bg-[#191816] border-[#E4D8C4]/15 text-[#F3EFE8]'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-white text-lg">Save to Private Vault</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">
+              <h3 className="font-display font-extrabold text-lg">NEW VAULT ENTRY</h3>
+              <button onClick={() => setShowAddModal(false)} className="opacity-60 hover:opacity-100 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-3 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-medium">
-              {(['account', 'experiment', 'document'] as const).map((t) => (
+            <div
+              className={`grid grid-cols-3 p-1 rounded-full font-mono-code text-[11px] border ${
+                isLight ? 'bg-[#EFE8DB] border-[#1F1915]/10' : 'bg-[#121110] border-[#E4D8C4]/10'
+              }`}
+            >
+              {(['account', 'document', 'experiment'] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setNewItemType(t)}
-                  className={`py-2 rounded-lg capitalize ${newItemType === t ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
+                  className={`py-2 rounded-full uppercase cursor-pointer ${
+                    newItemType === t
+                      ? isLight
+                        ? 'bg-[#1F1915] text-[#FBF8F2] font-bold'
+                        : 'bg-[#E4D8C4] text-[#121110] font-bold'
+                      : 'opacity-65'
+                  }`}
                 >
-                  {t === 'account' ? 'Login / Site' : t === 'experiment' ? 'Note' : 'Document'}
+                  {t === 'account' ? 'Login' : t === 'document' ? 'ID Doc' : 'Note'}
                 </button>
               ))}
             </div>
@@ -1113,50 +1645,72 @@ export default function VaultOneApp() {
               <input
                 type="text"
                 required
-                placeholder={newItemType === 'account' ? 'Website / App Name (e.g. Instagram, GitHub, SBI)' : newItemType === 'experiment' ? 'Note Title' : 'Document Title'}
+                placeholder={newItemType === 'account' ? 'Platform / Website (e.g. Instagram, GitHub)' : newItemType === 'document' ? 'Document Name' : 'Note Title'}
                 value={formField1}
                 onChange={(e) => setFormField1(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                className={`w-full px-4 py-3 rounded-2xl text-xs border focus:outline-none ${
+                  isLight
+                    ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80]'
+                    : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359]'
+                }`}
               />
               <input
                 type="text"
-                placeholder={newItemType === 'account' ? 'Category (e.g. Social, College, Banking, Shopping)' : newItemType === 'experiment' ? 'Tag / Tool' : 'Category (e.g. Identity, Education)'}
+                placeholder={newItemType === 'account' ? 'Tag (e.g. Social, College, Finance)' : newItemType === 'document' ? 'Category' : 'Tag'}
                 value={formField2}
                 onChange={(e) => setFormField2(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                className={`w-full px-4 py-3 rounded-2xl text-xs border focus:outline-none ${
+                  isLight
+                    ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80]'
+                    : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359]'
+                }`}
               />
               <input
                 type="text"
                 required={newItemType === 'account'}
-                placeholder={newItemType === 'account' ? 'Gmail / Email / Username used to sign in' : newItemType === 'experiment' ? 'Topic' : 'Expiry Date (YYYY-MM-DD)'}
+                placeholder={newItemType === 'account' ? 'Gmail / Username used' : newItemType === 'document' ? 'Expiry Date' : 'Topic'}
                 value={formField3}
                 onChange={(e) => setFormField3(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                className={`w-full px-4 py-3 rounded-2xl text-xs border focus:outline-none ${
+                  isLight
+                    ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80]'
+                    : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359]'
+                }`}
               />
               {newItemType !== 'document' && (
                 <input
                   type="text"
                   required={newItemType === 'account'}
-                  placeholder={newItemType === 'account' ? 'Password you set for this website' : 'Notes'}
+                  placeholder={newItemType === 'account' ? 'Password set for this site' : 'Details'}
                   value={formField4}
                   onChange={(e) => setFormField4(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                  className={`w-full px-4 py-3 rounded-2xl text-xs border focus:outline-none ${
+                    isLight
+                      ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80]'
+                      : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359]'
+                  }`}
                 />
               )}
               {newItemType === 'account' && (
                 <input
                   type="text"
-                  placeholder="Website URL (optional, e.g. https://github.com)"
+                  placeholder="Website URL (optional)"
                   value={formField5}
                   onChange={(e) => setFormField5(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500"
+                  className={`w-full px-4 py-3 rounded-2xl text-xs border focus:outline-none ${
+                    isLight
+                      ? 'bg-[#F3EDE2] border-[#1F1915]/15 text-[#1F1915] placeholder:text-[#9C8F80]'
+                      : 'bg-[#121110] border-[#E4D8C4]/12 text-[#F3EFE8] placeholder:text-[#6B6359]'
+                  }`}
                 />
               )}
               <button
                 type="submit"
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition-all"
+                className={`w-full py-3.5 rounded-full font-display font-bold text-xs uppercase tracking-wider transition-all cursor-pointer mt-1 ${
+                  isLight ? 'bg-[#1F1915] text-[#FBF8F2]' : 'bg-[#E4D8C4] text-[#121110]'
+                }`}
               >
-                Encrypt & Save Privately
+                Encrypt & Save
               </button>
             </form>
           </div>

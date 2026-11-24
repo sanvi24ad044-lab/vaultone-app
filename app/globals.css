@@ -1,8 +1,46 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-body {
-  background-color: #020617;
-  color: #f8fafc;
+@layer base {
+  body {
+    font-family: var(--font-space), sans-serif;
+  }
+}
+
+.font-display {
+  font-family: var(--font-syne), sans-serif;
+}
+
+.font-mono-code {
+  font-family: var(--font-mono), monospace;
+}
+
+/* Light Mode: Warm Alabaster Cream with subtle topographic contour lines */
+.theme-cream-bg {
+  background-color: #F6F2EA;
+  background-image:
+    radial-gradient(circle at 18% 22%, rgba(181, 148, 91, 0.12) 0%, transparent 45%),
+    radial-gradient(circle at 82% 78%, rgba(168, 152, 130, 0.14) 0%, transparent 50%),
+    repeating-radial-gradient(circle at 15% 30%, transparent 0, transparent 28px, rgba(31, 25, 21, 0.035) 29px, transparent 30px);
+}
+
+/* Dark Mode: Deep Matte Charcoal with subtle architectural grain & grid */
+.theme-charcoal-bg {
+  background-color: #121110;
+  background-image:
+    radial-gradient(circle at 80% 15%, rgba(151, 168, 142, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 20% 85%, rgba(228, 216, 196, 0.06) 0%, transparent 45%),
+    radial-gradient(rgba(228, 216, 196, 0.06) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 28px 28px;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 130, 118, 0.35);
+  border-radius: 9999px;
 }
